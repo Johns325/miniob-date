@@ -69,7 +69,8 @@ public:
    */
   RC create_table(const char *table_name, span<const AttrInfoSqlNode> attributes, const vector<string> &primary_keys,
       const StorageFormat storage_format = StorageFormat::ROW_FORMAT);
-
+  
+  auto drop_table(const std::string tb_name) -> RC;
   /**
    * @brief 根据表名查找表
    */

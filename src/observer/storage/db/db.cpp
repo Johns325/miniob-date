@@ -49,6 +49,38 @@ Db::~Db()
   LOG_INFO("Db has been closed: %s", name_.c_str());
 }
 
+auto Db::drop_table(const std::string tb_name) -> RC {
+  // 需要删除的文件包括: .table, .data,.index
+  if (find_table(tb_name.c_str()) == nullptr) {
+    // No such table. return silently
+    return RC::SUCCESS;
+  }
+  auto pos = opened_tables_.find(tb_name);
+  std::vector<std::string> files;
+  files.reserve(2 + pos->second->table_meta().index_num());
+  files.emplace_back(table_data_file(this->path_.c_str(), tb_name.c_str()));
+  files.emplace_back(table_meta_file(path_.c_str(), tb_name.c_str()));
+  files.emplace_back(table_text_file(path_.c_str(), tb_name.c_str()));
+  files.emplace_back(table_vector_file(path_.c_str(), tb_name.c_str()));
+  auto table = pos->second;
+  auto tb_meta = table->table_meta();
+  for (int i = 0; i < table->table_meta().index_num(); i++) {
+    auto index_meta = tb_meta.index(i);
+    files.emplace_back(table_index_file(path_.c_str(), tb_name.c_str(), index_meta->name()));
+  }
+  delete pos->second;
+  opened_tables_.erase(pos);
+  for(auto &file : files) {
+    if (unlink(file.c_str()) < 0) {
+      LOG_INFO("failed to remove file %s", file.c_str());
+    } else {
+      buffer_pool_manager_->close_file(file.data());
+    }
+  }
+  
+  return RC::SUCCESS;
+}
+
 RC Db::init(const char *name, const char *dbpath, const char *trx_kit_name, const char *log_handler_name, const char *storage_engine)
 {
   RC rc = RC::SUCCESS;
