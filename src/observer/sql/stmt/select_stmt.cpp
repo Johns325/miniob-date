@@ -40,7 +40,7 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
 
   BinderContext binder_context;
 
-  // collect tables in `from` statement
+  // step 1 collect tables in `from` statement
   vector<Table *>                tables;
   unordered_map<string, Table *> table_map;
   for (size_t i = 0; i < select_sql.relations.size(); i++) {
@@ -61,7 +61,7 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
     table_map.insert({table_name, table});
   }
 
-  // collect query fields in `select` statement
+  // step 2 collect query fields in `select` statement
   vector<unique_ptr<Expression>> bound_expressions;
   ExpressionBinder expression_binder(binder_context);
   
@@ -87,7 +87,7 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
     default_table = tables[0];
   }
 
-  // create filter statement in `where` statement
+  // step 3 create filter statement in `where` statement
   FilterStmt *filter_stmt = nullptr;
   RC          rc          = FilterStmt::create(db,
       default_table,
@@ -100,13 +100,29 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
     return rc;
   }
 
-  // everything alright
+  /* ******************************************************{binding having}*******************************************************************/
+  // having 中只能有出现在select后面的聚合表达式以及出现在group by后面的字段
+  vector<unique_ptr<Expression>> bound_having_expressions;  // 可以直接丢给Predicate Operator
+  {
+    if (0 != select_sql.having.size()) {
+      for (auto &expr : select_sql.having) {
+        auto rc = expression_binder.bind_expression(expr, bound_having_expressions);
+        if (!OB_SUCC(rc)) {
+          return rc;
+        }
+      } // end for
+    } // end if
+  } // end of scope
+
+
+  // step 4 everything alright
   SelectStmt *select_stmt = new SelectStmt();
 
   select_stmt->tables_.swap(tables);
   select_stmt->query_expressions_.swap(bound_expressions);
   select_stmt->filter_stmt_ = filter_stmt;
   select_stmt->group_by_.swap(group_by_expressions);
+  select_stmt->having_expressions_.swap(bound_having_expressions);
   stmt                      = select_stmt;
   return RC::SUCCESS;
 }

@@ -103,6 +103,8 @@ RC HashGroupByPhysicalOperator::next()
   } else {
     first_emited_ = true;
   }
+  //添加使用HAVING过滤分组的逻辑。
+  // your code here
   if (current_group_ == groups_.end()) {
     return RC::RECORD_EOF;
   }

@@ -70,18 +70,18 @@ D | 1 | 3
 F | 1 | 2
 NAME | COUNT(ID) | MAX(SCORE)
 
-5. MULTI COLUMN
-select id, score, avg(score), count(*) from t_group_by group by id, score;
-3 | 1 | 1 | 1
-1 | 2 | 2 | 1
-4 | 3 | 3 | 1
-3 | 2 | 2 | 2
-3 | 4 | 4 | 1
-3 | 3 | 3 | 1
-ID | SCORE | AVG(SCORE) | COUNT(*)
+5. MULTI TABLE
+select t_group_by.id, t_group_by.name, avg(t_group_by.score), avg(t_group_by_2.age) from t_group_by, t_group_by_2 where t_group_by.id=t_group_by_2.id group by t_group_by.id, t_group_by.name;
+1 | B | 2 | 10
+3 | A | 1 | 23.33
+3 | C | 3 | 23.33
+3 | D | 3 | 23.33
+3 | F | 2 | 23.33
+4 | C | 3 | 20
+T_GROUP_BY.ID | T_GROUP_BY.NAME | AVG(T_GROUP_BY.SCORE) | AVG(T_GROUP_BY_2.AGE)
 
 6. HAVING
-select id, score, avg(score), count(*) from t_group_by group by id, score having coung(*) > 1;
+select id, score, avg(score), count(*) from t_group_by group by id, score having count(*) > 1;
 3 | 2 | 2 | 2
 ID | SCORE | AVG(SCORE) | COUNT(*)
 

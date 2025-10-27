@@ -124,6 +124,7 @@ RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, unique_ptr<Logical
   }
 
   unique_ptr<LogicalOperator> group_by_oper;
+  // 针对聚合函数和group by 生成逻辑计划
   rc = create_group_by_plan(select_stmt, group_by_oper);
   if (OB_FAIL(rc)) {
     LOG_WARN("failed to create group by logical plan. rc=%s", strrc(rc));
@@ -330,10 +331,14 @@ RC LogicalPlanGenerator::create_group_by_plan(SelectStmt *select_stmt, unique_pt
   for (unique_ptr<Expression> &expression : query_expressions) {
     find_unbound_column(expression);
   }
-  // collect all aggregate expressions
+  // collect all aggregate expressions 
+  // 出现在SELECT 后的所有聚合表达式，记录在aggregate_expressions
   for (unique_ptr<Expression> &expression : query_expressions) {
     collector(expression);
   }
+  // 找出Having 中出现的所有聚合表达式，并把他加入到aggregate_expressions
+  // your code here
+
   if (group_by_expressions.empty() && aggregate_expressions.empty()) {
     // 既没有group by也没有聚合函数，不需要group by
     return RC::SUCCESS;

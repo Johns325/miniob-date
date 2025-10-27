@@ -29,7 +29,7 @@ RC ScalarGroupByPhysicalOperator::open(Trx *trx)
   ASSERT(children_.size() == 1, "group by operator only support one child, but got %d", children_.size());
 
   PhysicalOperator &child = *children_[0];
-  RC                rc    = child.open(trx);
+  RC                rc    = child.open(trx); // 初始化孩子算子
   if (OB_FAIL(rc)) {
     LOG_INFO("failed to open child operator. rc=%s", strrc(rc));
     return rc;
@@ -39,6 +39,7 @@ RC ScalarGroupByPhysicalOperator::open(Trx *trx)
 
   ValueListTuple group_by_evaluated_tuple;
 
+  // 不断从孩子节点获取行记录，并调用aggregate更新聚合结果。
   while (OB_SUCC(rc = child.next())) {
     Tuple *child_tuple = child.current_tuple();
     if (nullptr == child_tuple) {

@@ -15,8 +15,11 @@ See the Mulan PSL v2 for more details. */
 #pragma once
 
 #include "common/sys/rc.h"
+#include "sql/expr/expression.h"
 #include "sql/stmt/stmt.h"
 #include "storage/field/field.h"
+#include <memory>
+#include <vector>
 
 class FieldMeta;
 class FilterStmt;
@@ -50,4 +53,5 @@ private:
   vector<Table *>                tables_;
   FilterStmt                    *filter_stmt_ = nullptr;
   vector<unique_ptr<Expression>> group_by_;
+  vector<unique_ptr<Expression>> having_expressions_;
 };

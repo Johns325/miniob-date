@@ -60,7 +60,7 @@ RC GroupByPhysicalOperator::aggregate(AggregatorList &aggregator_list, const Tup
       LOG_WARN("failed to get value from expression. rc=%s", strrc(rc));
       return rc;
     }
-
+    // 执行聚合逻辑
     rc = aggregator->accumulate(value);
     if (OB_FAIL(rc)) {
       LOG_WARN("failed to accumulate value. rc=%s", strrc(rc));
