@@ -19,6 +19,7 @@ See the Mulan PSL v2 for more details. */
 class GroupByLogicalOperator : public LogicalOperator
 {
 public:
+  friend class PhysicalPlanGenerator;
   GroupByLogicalOperator(vector<unique_ptr<Expression>> &&group_by_exprs, vector<Expression *> &&expressions);
 
   virtual ~GroupByLogicalOperator() = default;
@@ -28,8 +29,11 @@ public:
 
   auto &group_by_expressions() { return group_by_expressions_; }
   auto &aggregate_expressions() { return aggregate_expressions_; }
+  auto has_having() const -> bool { return !having_expressions_.empty();}
+  auto set_having_expressions(vector<unique_ptr<Expression>>&& expres) { having_expressions_ = std::move(expres);}
 
 private:
   vector<unique_ptr<Expression>> group_by_expressions_;
   vector<Expression *>           aggregate_expressions_;  ///< 输出的表达式，可能包含聚合函数
+  vector<unique_ptr<Expression>> having_expressions_;
 };

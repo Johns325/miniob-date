@@ -27,6 +27,7 @@ class GroupByPhysicalOperator : public PhysicalOperator
 public:
   GroupByPhysicalOperator(vector<Expression *> &&expressions);
   virtual ~GroupByPhysicalOperator() = default;
+  
 
 protected:
   using AggregatorList = vector<unique_ptr<Aggregator>>;

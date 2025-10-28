@@ -84,6 +84,7 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
         COMMA
         TRX_BEGIN
         TRX_COMMIT
+        HAVING
         TRX_ROLLBACK
         INT_T
         STRING_T
@@ -156,6 +157,9 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
 %type <value_list>          value_list
 %type <condition_list>      where
 %type <condition_list>      condition_list
+%type <expression_list>     having_stmt
+%type <expression>          having_condition
+%type <expression_list>     having_condition_list
 %type <cstring>             storage_format
 %type <key_list>            primary_key
 %type <key_list>            attr_list
@@ -482,7 +486,7 @@ update_stmt:      /*  update 语句的语法解析树*/
     }
     ;
 select_stmt:        /*  select 语句的语法解析树*/
-    SELECT expression_list FROM rel_list where group_by
+    SELECT expression_list FROM rel_list where group_by having_stmt
     {
       $$ = new ParsedSqlNode(SCF_SELECT);
       if ($2 != nullptr) {
@@ -504,6 +508,13 @@ select_stmt:        /*  select 语句的语法解析树*/
         $$->selection.group_by.swap(*$6);
         delete $6;
       }
+      // having
+      if ($7 != nullptr) {
+        for (auto iter = $7->rbegin(); iter != $7->rend(); ++iter) {
+          $$->selection.having.emplace_back((std::move(*iter)));
+        }
+        delete $7;
+      }
     }
     ;
 calc_stmt:
@@ -514,6 +525,35 @@ calc_stmt:
       delete $2;
     }
     ;
+// type: std::vector<Expression*> *
+having_stmt:
+/* empty */ {
+    $$ = nullptr;
+  }
+  | HAVING having_condition_list {
+    $$ = $2;
+  }
+  ;
+having_condition_list:
+  /* empty */ {
+    $$ = nullptr;
+  }
+  | having_condition {
+    $$ = new std::vector<unique_ptr<Expression>>;
+    $$->emplace_back($1);
+  }
+  | having_condition AND having_condition_list {
+    $$ = $3;
+    $$->emplace_back($1);
+  };
+
+having_condition:
+  expression comp_op expression {
+    std::unique_ptr<Expression> left($1);
+    std::unique_ptr<Expression> right($3);
+    $$ = new ComparisonExpr($2, std::move(left), std::move(right));
+  }
+  ;
 
 expression_list:
     expression
@@ -568,7 +608,6 @@ expression:
     // your code here
     | ID LBRACE expression RBRACE {
       $$ = create_aggregate_expression($1, $3, sql_string, &@$);
-
     }
     ;
 

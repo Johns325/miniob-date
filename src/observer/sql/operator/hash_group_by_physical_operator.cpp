@@ -28,6 +28,7 @@ HashGroupByPhysicalOperator::HashGroupByPhysicalOperator(
 
 RC HashGroupByPhysicalOperator::open(Trx *trx)
 {
+  // Lab2 TODO: 支持带 HAVING 的 GROUP BY 聚合
   ASSERT(children_.size() == 1, "group by operator only support one child, but got %d", children_.size());
 
   PhysicalOperator &child = *children_[0];
@@ -94,6 +95,15 @@ RC HashGroupByPhysicalOperator::open(Trx *trx)
 
 RC HashGroupByPhysicalOperator::next()
 {
+  // Lab2 TODO
+  // 支持带 HAVING 的 GROUP BY 聚合 
+  //
+  // 实现要点：
+  // 1. 在 open() 中：除了计算 SELECT 子句中的聚合函数，还需要同时计算
+  //    HAVING 子句中出现的聚合函数（确保其结果可用于后续过滤）。
+  // 2. 在 next() 中：根据聚合结果判断当前分组是否满足 HAVING 条件，
+  //    若不满足则跳过该分组（更新 current_group_），
+  //    若满足则返回该分组的聚合结果（返回 RC::SUCCESS）。
   if (current_group_ == groups_.end()) {
     return RC::RECORD_EOF;
   }

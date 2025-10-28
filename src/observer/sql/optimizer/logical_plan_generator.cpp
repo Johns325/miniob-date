@@ -124,6 +124,7 @@ RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, unique_ptr<Logical
   }
 
   unique_ptr<LogicalOperator> group_by_oper;
+  // 针对聚合函数和group by 生成逻辑计划
   rc = create_group_by_plan(select_stmt, group_by_oper);
   if (OB_FAIL(rc)) {
     LOG_WARN("failed to create group by logical plan. rc=%s", strrc(rc));
@@ -280,6 +281,14 @@ RC LogicalPlanGenerator::create_plan(ExplainStmt *explain_stmt, unique_ptr<Logic
 
 RC LogicalPlanGenerator::create_group_by_plan(SelectStmt *select_stmt, unique_ptr<LogicalOperator> &logical_operator)
 {
+  // Lab2 TODO: 支持带 HAVING 的 GROUP BY 聚合
+  //
+  // 目标：确保 HAVING 子句中的表达式信息被正确传递到逻辑算子中。
+  // 实现要点：
+  // 1. 从 select_stmt->having_expressions_ 中提取 HAVING 表达式；
+  // 2. 遍历 HAVING 表达式树，收集其中的聚合函数，并将它们加入 aggregate_expressions；
+  // 3. 将 HAVING 表达式（以及其中的聚合信息）绑定到 GroupByLogicalOperator，
+  //    以便后续物理算子能够在聚合结果计算完成后执行 HAVING 过滤。
   vector<unique_ptr<Expression>> &group_by_expressions = select_stmt->group_by();
   vector<Expression *> aggregate_expressions;
   vector<unique_ptr<Expression>> &query_expressions = select_stmt->query_expressions();
@@ -330,10 +339,14 @@ RC LogicalPlanGenerator::create_group_by_plan(SelectStmt *select_stmt, unique_pt
   for (unique_ptr<Expression> &expression : query_expressions) {
     find_unbound_column(expression);
   }
-  // collect all aggregate expressions
+  // collect all aggregate expressions 
+  // 出现在SELECT 后的所有聚合表达式，记录在aggregate_expressions
   for (unique_ptr<Expression> &expression : query_expressions) {
     collector(expression);
   }
+  // 找出Having 中出现的所有聚合表达式，并把他加入到aggregate_expressions
+  // your code here
+
   if (group_by_expressions.empty() && aggregate_expressions.empty()) {
     // 既没有group by也没有聚合函数，不需要group by
     return RC::SUCCESS;

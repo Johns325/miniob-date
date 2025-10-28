@@ -345,6 +345,14 @@ RC PhysicalPlanGenerator::create_plan(CalcLogicalOperator &logical_oper, unique_
 
 RC PhysicalPlanGenerator::create_plan(GroupByLogicalOperator &logical_oper, unique_ptr<PhysicalOperator> &oper, Session* session)
 {
+  // Lab2 TODO: 支持带 HAVING 的 GROUP BY 聚合
+  //
+  // 目标：确保 HAVING 子句中的所有表达式信息被正确传递到物理算子中。
+  // 实现要点：
+  // 1. 从 GroupByLogicalOperator算子中提取 HAVING 表达式；
+  // 2. 将 HAVING 表达式（以及其中的聚合信息）绑定到 GroupByPhysicalOperator，
+  //    以便后续物理算子能够在聚合结果计算完成后执行 HAVING 过滤。
+
   RC rc = RC::SUCCESS;
 
   vector<unique_ptr<Expression>> &group_by_expressions = logical_oper.group_by_expressions();
