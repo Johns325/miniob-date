@@ -12,10 +12,20 @@ See the Mulan PSL v2 for more details. */
 
 #include "common/lang/vector.h"
 #include "sql/optimizer/rewrite_rule.h"
-
+#include <vector>
 /**
  * @brief 将一些谓词表达式下推到join中
  * @ingroup Rewriter
  */
-class PredicateToJoinRewriter
-{};
+class PredicateToJoinRewriter : public RewriteRule
+{
+public:
+  PredicateToJoinRewriter()          = default;
+  virtual ~PredicateToJoinRewriter() = default;
+
+  RC rewrite(unique_ptr<LogicalOperator> &oper, bool &change_made) override;
+
+private:
+  
+  // void visitor (LogicalOperator* oper, std::vector<TableGetLogicalOperator*>& table_get_ops); 
+};

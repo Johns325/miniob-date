@@ -311,6 +311,8 @@ public:
     return (left_->type() == ExprType::FIELD && right_->type() == ExprType::VALUE) || (right_->type() == ExprType::FIELD && left_->type() == ExprType::VALUE);
   }
 
+  bool field_field_comparison() { return (left_->type() == ExprType::FIELD && right_->type() == ExprType::FIELD); }
+
   /**
    * @brief 根据 ComparisonExpr 获得 `select` 结果。
    * select 的长度与chunk 的行数相同，表示每一行在ComparisonExpr 计算后是否会被输出。
@@ -376,6 +378,8 @@ public:
   Type conjunction_type() const { return conjunction_type_; }
 
   vector<unique_ptr<Expression>> &children() { return children_; }
+
+  void add_child(unique_ptr<Expression>&& child) { children_.emplace_back(std::move(child)); }
 
 private:
   Type                           conjunction_type_;

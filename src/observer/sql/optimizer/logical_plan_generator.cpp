@@ -127,7 +127,44 @@ RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, unique_ptr<Logical
       JoinLogicalOperator *join_oper = new JoinLogicalOperator;
       join_oper->add_child(std::move(table_oper));
       join_oper->add_child(std::move(table_get_oper));
-      join_oper->add_join_predicate(std::move(select_stmt->join_expres_[table_index]));
+      std::vector<std::unique_ptr<Expression>> pushed_down_from_where;
+      for (size_t i = 0; i < select_stmt->join_expres_.size(); i++) {
+        if (!valid[i])
+          continue;
+        auto cmp_expr = dynamic_cast<ComparisonExpr*>(select_stmt->conditions_[i].get());
+        if (!cmp_expr->field_field_comparison()) {
+          continue;
+        }
+        auto left_field = dynamic_cast<FieldExpr*>(cmp_expr->left().get());
+        auto right_field = dynamic_cast<FieldExpr*>(cmp_expr->right().get());
+        auto checker = [&](FieldExpr* expr) -> bool {
+          int idx;
+          for (idx = 0; idx <= table_index+1; idx++) {
+            if (string(tables[idx]->name()) == string(expr->table_name())) {
+              break;
+            }
+          }
+          return idx <= (table_index + 1);
+        };
+        if (checker(left_field) && checker(right_field)) {
+          pushed_down_from_where.emplace_back(std::move(select_stmt->conditions_[i]));
+          valid[i] = false;
+        }
+      }
+      
+      if (select_stmt->join_expres_[table_index].get() != nullptr) {
+        if (!pushed_down_from_where.empty()) {
+          auto conj_expr = dynamic_cast<ConjunctionExpr*>(select_stmt->join_expres_[table_index].get());
+          for (auto &expr : pushed_down_from_where) {
+            conj_expr->add_child(std::move(expr));
+          }
+        }
+        join_oper->add_join_predicate(std::move(select_stmt->join_expres_[table_index]));
+      } else {
+        // 新建一个conjunction expr
+        unique_ptr<ConjunctionExpr> conjunction_expr(new ConjunctionExpr(ConjunctionExpr::Type::AND, pushed_down_from_where));
+        join_oper->add_join_predicate(std::move(conjunction_expr));
+      }
       table_index++;
       table_oper = unique_ptr<LogicalOperator>(join_oper);
     }
