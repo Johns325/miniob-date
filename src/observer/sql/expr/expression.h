@@ -89,6 +89,7 @@ public:
    */
   virtual RC try_get_value(Value &value) const { return RC::UNIMPLEMENTED; }
 
+
   /**
    * @brief 从 `chunk` 中获取表达式的计算结果 `column`
    */
@@ -304,6 +305,10 @@ public:
   unique_ptr<Expression> copy() const override
   {
     return make_unique<ComparisonExpr>(comp_, left_->copy(), right_->copy());
+  }
+
+  bool field_value_comparison() {
+    return (left_->type() == ExprType::FIELD && right_->type() == ExprType::VALUE) || (right_->type() == ExprType::FIELD && left_->type() == ExprType::VALUE);
   }
 
   /**

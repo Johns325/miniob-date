@@ -42,6 +42,11 @@ public:
   RC     next() override;
   RC     close() override;
   Tuple *current_tuple() override;
+  void set_predicate(unique_ptr<Expression>&& predicate) {
+    ASSERT(predicate->type() == ExprType::CONJUNCTION, "predicate should be a conjunction expression");
+    join_predicate_ = std::move(predicate);
+  }
+  RC     filter(Tuple* tuple, bool& result);
 
 private:
   RC left_next();   //! 左表遍历下一条数据
@@ -61,4 +66,5 @@ private:
   JoinedTuple       joined_tuple_;         //! 当前关联的左右两个tuple
   bool              round_done_   = true;  //! 右表遍历的一轮是否结束
   bool              right_closed_ = true;  //! 右表算子是否已经关闭
+  unique_ptr<Expression> join_predicate_;
 };

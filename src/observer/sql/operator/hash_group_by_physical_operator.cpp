@@ -50,6 +50,9 @@ RC HashGroupByPhysicalOperator::open(Trx *trx)
     }
 
     // 找到对应的group
+    // using GroupType = tuple<ValueListTuple, GroupValueType>;
+    // using GroupValueType = tuple<AggregatorList, CompositeTuple>;
+    // using AggregatorList = vector<unique_ptr<Aggregator>>;
     GroupType *found_group = nullptr;
     rc                     = find_group(*child_tuple, found_group);
     if (OB_FAIL(rc)) {

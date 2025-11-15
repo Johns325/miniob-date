@@ -310,8 +310,23 @@ RC PhysicalPlanGenerator::create_plan(JoinLogicalOperator &join_oper, unique_ptr
   }
   if (session->hash_join_on() && can_use_hash_join(join_oper)) {
     // your code here
+    auto join_physical_oper = new HashJoinPhysicalOperator();
+    for (auto &child_oper : child_opers) {
+      unique_ptr<PhysicalOperator> child_physical_oper;
+      rc = create(*child_oper, child_physical_oper, session);
+      if (rc != RC::SUCCESS) {
+        LOG_WARN("failed to create physical child oper. rc=%s", strrc(rc));
+        return rc;
+      }
+      join_physical_oper->add_child(std::move(child_physical_oper));
+    }
+    auto& predicates = join_oper.get_join_predicates();
+    if (!predicates.empty()) {
+      join_physical_oper->set_predicate(std::move(predicates[0]));
+    }
+    oper.reset(join_physical_oper);
   } else {
-    unique_ptr<PhysicalOperator> join_physical_oper(new NestedLoopJoinPhysicalOperator());
+    auto join_physical_oper = new NestedLoopJoinPhysicalOperator();
     for (auto &child_oper : child_opers) {
       unique_ptr<PhysicalOperator> child_physical_oper;
       rc = create(*child_oper, child_physical_oper, session);
@@ -322,8 +337,11 @@ RC PhysicalPlanGenerator::create_plan(JoinLogicalOperator &join_oper, unique_ptr
 
       join_physical_oper->add_child(std::move(child_physical_oper));
     }
-
-    oper = std::move(join_physical_oper);
+    auto& predicates = join_oper.get_join_predicates();
+    if (!predicates.empty()) {
+      join_physical_oper->set_predicate(std::move(predicates[0]));
+    }
+    oper.reset(join_physical_oper);
   }
   return rc;
 }
@@ -331,7 +349,22 @@ RC PhysicalPlanGenerator::create_plan(JoinLogicalOperator &join_oper, unique_ptr
 bool PhysicalPlanGenerator::can_use_hash_join(JoinLogicalOperator &join_oper)
 {
   // your code here
-  return false;
+  bool all_equal_join{true};
+  if (join_oper.get_join_predicates().empty()) {
+    return false;
+  }
+  auto& exprs = join_oper.get_join_predicates();
+  ASSERT(exprs.size() == 1, "Only one expression left");
+  auto& expr = exprs[0];
+  ASSERT(expr->type() == ExprType::CONJUNCTION, "Expression should be a conjunction type");
+  auto conj_expr = dynamic_cast<ConjunctionExpr*>(expr.get());
+  for(auto &child : conj_expr->children()) {
+    ASSERT(child->type() == ExprType::COMPARISON, "Every child expression should be a comparison type");
+    if (dynamic_cast<ComparisonExpr*>(child.get())->comp() != CompOp::EQUAL_TO) {
+      return false;
+    }
+  }
+  return all_equal_join;
 }
 
 RC PhysicalPlanGenerator::create_plan(CalcLogicalOperator &logical_oper, unique_ptr<PhysicalOperator> &oper, Session* session)
@@ -345,13 +378,6 @@ RC PhysicalPlanGenerator::create_plan(CalcLogicalOperator &logical_oper, unique_
 
 RC PhysicalPlanGenerator::create_plan(GroupByLogicalOperator &logical_oper, unique_ptr<PhysicalOperator> &oper, Session* session)
 {
-  // Lab2 TODO: 支持带 HAVING 的 GROUP BY 聚合
-  //
-  // 目标：确保 HAVING 子句中的所有表达式信息被正确传递到物理算子中。
-  // 实现要点：
-  // 1. 从 GroupByLogicalOperator算子中提取 HAVING 表达式；
-  // 2. 将 HAVING 表达式（以及其中的聚合信息）绑定到 GroupByPhysicalOperator，
-  //    以便后续物理算子能够在聚合结果计算完成后执行 HAVING 过滤。
 
   RC rc = RC::SUCCESS;
 

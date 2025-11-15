@@ -93,25 +93,56 @@ RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, unique_ptr<Logical
   unique_ptr<LogicalOperator> table_oper(nullptr);
   last_oper = &table_oper;
   unique_ptr<LogicalOperator> predicate_oper;
-
-  RC rc = create_plan(select_stmt->filter_stmt(), predicate_oper);
-  if (OB_FAIL(rc)) {
-    LOG_WARN("failed to create predicate logical plan. rc=%s", strrc(rc));
-    return rc;
-  }
+  RC rc {RC::SUCCESS};
 
   const vector<Table *> &tables = select_stmt->tables();
+  int table_index{0};
+  std::vector<bool> valid(select_stmt->conditions_.size(), true);
+  std::vector<unique_ptr<Expression>> remainning;
   for (Table *table : tables) {
 
     unique_ptr<LogicalOperator> table_get_oper(new TableGetLogicalOperator(table, ReadWriteMode::READ_ONLY));
+    std::vector<unique_ptr<Expression>> predicates;
+    for (size_t i = 0; i < select_stmt->conditions_.size(); i++) {
+      if (!valid[i]) {
+        continue;
+      }
+      auto cmp_expr = dynamic_cast<ComparisonExpr*>(select_stmt->conditions_[i].get());
+      if (!cmp_expr->field_value_comparison()) {
+        continue;
+      }
+      auto field_expr = dynamic_cast<FieldExpr*>(cmp_expr->left()->type() == ExprType::FIELD ? cmp_expr->left().get(): cmp_expr->right().get());
+      if (string(field_expr->table_name()) == string(table->name())) {
+        predicates.emplace_back(std::move(select_stmt->conditions_[i]));
+        valid[i] = false;
+      }
+    }
+    if (!predicates.empty()) {
+      dynamic_cast<TableGetLogicalOperator*>(table_get_oper.get())->set_predicates(std::move(predicates));
+    }
+    
     if (table_oper == nullptr) {
       table_oper = std::move(table_get_oper);
     } else {
       JoinLogicalOperator *join_oper = new JoinLogicalOperator;
       join_oper->add_child(std::move(table_oper));
       join_oper->add_child(std::move(table_get_oper));
+      join_oper->add_join_predicate(std::move(select_stmt->join_expres_[table_index]));
+      table_index++;
       table_oper = unique_ptr<LogicalOperator>(join_oper);
     }
+  }
+  
+  for (size_t i = 0; i < select_stmt->conditions_.size(); i++) {
+    if (valid[i]) {
+      remainning.emplace_back(std::move(select_stmt->conditions_[i]));
+    }
+  }
+  
+  if (!remainning.empty()) {
+    unique_ptr<ConjunctionExpr> conjunction_expr(new ConjunctionExpr(ConjunctionExpr::Type::AND, remainning));
+    auto ptr = unique_ptr<PredicateLogicalOperator>(new PredicateLogicalOperator(std::move(conjunction_expr)));
+    predicate_oper = std::move(ptr);
   }
 
 
@@ -340,13 +371,9 @@ RC LogicalPlanGenerator::create_group_by_plan(SelectStmt *select_stmt, unique_pt
     find_unbound_column(expression);
   }
   // collect all aggregate expressions 
-  // 出现在SELECT 后的所有聚合表达式，记录在aggregate_expressions
   for (unique_ptr<Expression> &expression : query_expressions) {
     collector(expression);
   }
-  // 找出Having 中出现的所有聚合表达式，并把他加入到aggregate_expressions
-  // your code here
-
   if (group_by_expressions.empty() && aggregate_expressions.empty()) {
     // 既没有group by也没有聚合函数，不需要group by
     return RC::SUCCESS;

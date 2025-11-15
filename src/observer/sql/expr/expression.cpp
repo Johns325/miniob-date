@@ -276,6 +276,7 @@ RC ConjunctionExpr::get_value(const Tuple &tuple, Value &value) const
       value.set_boolean(bool_value);
       return rc;
     }
+    // std::cout << "expre\n";
   }
 
   bool default_value = (conjunction_type_ == Type::AND);
@@ -562,7 +563,8 @@ unique_ptr<Aggregator> AggregateExpr::create_aggregator() const
     }
     case Type::MAX: {
       aggregator = make_unique<MaxAggregator>();
-    } break;
+      break;
+    }
     default: {
       ASSERT(false, "unsupported aggregate type");
       break;

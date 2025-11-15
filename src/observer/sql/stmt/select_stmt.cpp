@@ -31,6 +31,148 @@ SelectStmt::~SelectStmt()
   }
 }
 
+RC check_join_validation(UnboundFieldExpr *expr, BinderContext &info, size_t index)
+{
+  Table *table{nullptr};
+  auto  &tables = info.query_tables();
+  if (!is_blank(expr->table_name())) {
+    // table name不为空有两种情况，第一种是直接给的表名，第二中情况下是别名
+    if (0 == strcmp(expr->table_name(), tables[index]->name())) {
+      table      = tables[index];
+      auto field = table->table_meta().field(expr->field_name());
+      if (field != nullptr) {
+        return RC::SUCCESS;
+      }
+    } else {
+      for (auto k = static_cast<int>(index - 1); k >= 0; --k) {
+        table = nullptr;
+        if (0 == strcmp(expr->table_name(), tables[k]->name())) {
+          table = tables[k];
+          if (table->table_meta().field(expr->field_name()) != nullptr) {
+            return RC::SUCCESS;
+          }
+        }
+      }
+    }
+
+    return RC::SCHEMA_FIELD_NOT_EXIST;
+  }
+  // only specify the field_name;
+  const FieldMeta *meta{nullptr};
+  for (int k = static_cast<int>(index); k >= 0; --k) {
+    table = tables[k];
+    if (table->table_meta().field(expr->field_name())) {
+      if (meta != nullptr) {
+        // field is ambiguous
+        return RC::SCHEMA_FIELD_AMBIGUOUS;
+      }
+      meta = table->table_meta().field(expr->field_name());
+    }
+  }
+  return (meta == nullptr ? RC::SCHEMA_DB_NOT_EXIST : RC::SUCCESS);
+}
+
+/**
+ * relations:     从parser 中解析到的realtions. 例如select * from a,b; 那么relations:{a,b}.
+ * table_map:     name to table mapping.
+ * alias2table:   alias to table mapping.
+ * ctx:           used to store binding information of current query.
+ * tables:        tables current query references.
+ * join_exprs:    join conditions within current query.
+ */
+std::pair<RC, ExpressionBinder *> bind_from(Db *db, std::vector<std::unique_ptr<rel_info>> &relations,
+    BinderContext &ctx, std::vector<unique_ptr<ConjunctionExpr>> &join_exprs)
+{
+  // auto &info = ctx.bound_info();
+  /* 维护当前(子)查询的表名到表和别名到表的映射。*/
+  for (size_t i = 0; i < relations.size(); i++) {
+
+    auto table_name = (*relations[i]).relation_name;
+    if (table_name.empty()) {
+      LOG_WARN("invalid argument. relation name is empty. index=%d", i);
+      return {RC::INVALID_ARGUMENT, nullptr};
+    }
+
+    Table *table = db->find_table(table_name.c_str());
+    if (nullptr == table) {
+      LOG_WARN("no such table. db=%s, table_name=%s", db->name(), table_name.c_str());
+      return {RC::SCHEMA_TABLE_NOT_EXIST, nullptr};
+    }
+
+    ASSERT(string(table->name()) == table_name, "These two names must be equal");
+    ctx.add_table(table);
+  }
+
+  if (!(*relations[0]).on_conditions.empty()) {
+    // bind join condtions.
+    // almost unreachable.
+    return {RC::INTERNAL, nullptr};
+  }
+
+  auto binder = new ExpressionBinder(ctx);
+  // tabe[i].on_conditions refers table_i and the joined table which is the join table of tables before table_i.
+  // 应该先对on_conditions中的表达式进行绑定后再判定有效性
+  // std::vector<unique_ptr<ComparisonExpr>> join_exprs;
+  for (size_t k = 1; k < relations.size(); ++k) {
+    auto &rel_info = *relations[k];
+    if (!rel_info.on_conditions.empty()) {
+      std::vector<unique_ptr<Expression>> bound_expres;
+      for (auto &expr : rel_info.on_conditions) {
+        // cmp shall be a ComparisonExpr.
+        // 现在假设on 中的条件只包含ValueExpr 和 FieldExpr.
+        ASSERT(expr->type() == ExprType::COMPARISON, "Expression type is invalid");
+        auto cmp = static_cast<ComparisonExpr *>(expr.get());
+        if (cmp->left()->type() == ExprType::UNBOUND_FIELD) {
+          auto unbound_expr = static_cast<UnboundFieldExpr *>(cmp->left().get());
+          auto rc           = check_join_validation(unbound_expr, ctx, k);
+          if (!OB_SUCC(rc)) {
+            delete binder;
+            return {rc, nullptr};
+          }
+        }
+
+        if (cmp->right()->type() == ExprType::UNBOUND_FIELD) {
+          auto unbound_expr = static_cast<UnboundFieldExpr *>(cmp->right().get());
+          auto rc           = check_join_validation(unbound_expr, ctx, k);
+          if (!OB_SUCC(rc)) {
+            delete binder;
+            return {rc, nullptr};
+          }
+        }
+        // std::unique_ptr<Expression> expr1(cmp);
+        auto rc = binder->bind_expression(expr, bound_expres);
+        if (OB_FAIL(rc)) {
+          LOG_INFO("bind expression failed. rc=%s", strrc(rc));
+          delete binder;
+          return {rc, nullptr};
+        }
+      }
+      // 再做一个ConjunctionExpression
+      auto ptr = std::unique_ptr<ConjunctionExpr>(new ConjunctionExpr(ConjunctionExpr::Type::AND, bound_expres));
+      join_exprs.emplace_back(std::move(ptr));
+    } else {
+      join_exprs.emplace_back(nullptr);
+    }
+  }
+  return {RC::SUCCESS, binder};
+}
+
+RC bind_where(Db *db, ExpressionBinder *binder, std::vector<std::unique_ptr<Expression>> &expressions,
+    vector<unique_ptr<Expression>> &bound_expressions)
+{
+  if (0 == expressions.size()) {
+    return RC::SUCCESS;
+  }
+  for (auto &expression : expressions) {
+    RC rc = binder->bind_expression(expression, bound_expressions);
+    if (OB_FAIL(rc)) {
+      LOG_INFO("bind expression failed. rc=%s", strrc(rc));
+      return rc;
+    }
+  }
+  return RC::SUCCESS;
+}
+
 RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
 {
   if (nullptr == db) {
@@ -41,32 +183,27 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
   BinderContext binder_context;
 
   // step 1 collect tables in `from` statement
-  vector<Table *>                tables;
-  unordered_map<string, Table *> table_map;
-  for (size_t i = 0; i < select_sql.relations.size(); i++) {
-    const char *table_name = select_sql.relations[i].c_str();
-    if (nullptr == table_name) {
-      LOG_WARN("invalid argument. relation name is null. index=%d", i);
-      return RC::INVALID_ARGUMENT;
+  BinderContext                                 context;
+  vector<Table *>                               tables;
+  unordered_map<string, Table *>                table_map;
+  std::vector<std::unique_ptr<ConjunctionExpr>> join_expres;
+  ExpressionBinder                             *expression_binder;
+  /* ******************************************************{binding
+   * from}*********************************************************************/
+  {
+    // step1 开始绑定FROM
+    auto res = bind_from(db, select_sql.relations, context, join_expres);
+    if (!OB_SUCC(res.first)) {
+      return res.first;
     }
-
-    Table *table = db->find_table(table_name);
-    if (nullptr == table) {
-      LOG_WARN("no such table. db=%s, table_name=%s", db->name(), table_name);
-      return RC::SCHEMA_TABLE_NOT_EXIST;
-    }
-
-    binder_context.add_table(table);
-    tables.push_back(table);
-    table_map.insert({table_name, table});
+    expression_binder = res.second;
   }
 
   // step 2 collect query fields in `select` statement
   vector<unique_ptr<Expression>> bound_expressions;
-  ExpressionBinder expression_binder(binder_context);
-  
+
   for (unique_ptr<Expression> &expression : select_sql.expressions) {
-    RC rc = expression_binder.bind_expression(expression, bound_expressions);
+    RC rc = expression_binder->bind_expression(expression, bound_expressions);
     if (OB_FAIL(rc)) {
       LOG_INFO("bind expression failed. rc=%s", strrc(rc));
       return rc;
@@ -75,54 +212,64 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
 
   vector<unique_ptr<Expression>> group_by_expressions;
   for (unique_ptr<Expression> &expression : select_sql.group_by) {
-    RC rc = expression_binder.bind_expression(expression, group_by_expressions);
+    RC rc = expression_binder->bind_expression(expression, group_by_expressions);
     if (OB_FAIL(rc)) {
       LOG_INFO("bind expression failed. rc=%s", strrc(rc));
       return rc;
     }
   }
 
-  Table *default_table = nullptr;
-  if (tables.size() == 1) {
-    default_table = tables[0];
-  }
+  // Table *default_table = nullptr;
+  // if (tables.size() == 1) {
+  //   default_table = tables[0];
+  // }
 
-  // step 3 create filter statement in `where` statement
-  FilterStmt *filter_stmt = nullptr;
-  RC          rc          = FilterStmt::create(db,
-      default_table,
-      &table_map,
-      select_sql.conditions.data(),
-      static_cast<int>(select_sql.conditions.size()),
-      filter_stmt);
-  if (rc != RC::SUCCESS) {
-    LOG_WARN("cannot construct filter stmt");
-    return rc;
-  }
+  // // step 3 create filter statement in `where` statement
+  // FilterStmt *filter_stmt = nullptr;
+  // RC          rc          = FilterStmt::create(db,
+  //     default_table,
+  //     &table_map,
+  //     select_sql.conditions.data(),
+  //     static_cast<int>(select_sql.conditions.size()),
+  //     filter_stmt);
+  // if (rc != RC::SUCCESS) {
+  //   LOG_WARN("cannot construct filter stmt");
+  //   return rc;
+  // }
 
-  /* ******************************************************{binding having}*******************************************************************/
+   /* ******************************************************{binding where}*******************************************************************/
+  vector<unique_ptr<Expression>> bound_where_expressions;  // 可以直接丢给Predicate Operator
+  {
+    auto rc = bind_where(db, expression_binder, select_sql.conditions, bound_where_expressions);
+    if (!OB_SUCC(rc)) {
+      return rc;
+    }
+  } // end of scope
+
+  /* ******************************************************{binding
+   * having}*******************************************************************/
   // having 中只能有出现在select后面的聚合表达式以及出现在group by后面的字段
   vector<unique_ptr<Expression>> bound_having_expressions;  // 可以直接丢给Predicate Operator
   {
     if (0 != select_sql.having.size()) {
       for (auto &expr : select_sql.having) {
-        auto rc = expression_binder.bind_expression(expr, bound_having_expressions);
+        auto rc = expression_binder->bind_expression(expr, bound_having_expressions);
         if (!OB_SUCC(rc)) {
           return rc;
         }
-      } // end for
-    } // end if
-  } // end of scope
-
+      }  // end for
+    }  // end if
+  }  // end of scope
 
   // step 4 everything alright
   SelectStmt *select_stmt = new SelectStmt();
 
-  select_stmt->tables_.swap(tables);
+  select_stmt->tables_.swap(context.query_tables());
+  select_stmt->join_expres_.swap(join_expres);
   select_stmt->query_expressions_.swap(bound_expressions);
-  select_stmt->filter_stmt_ = filter_stmt;
+  select_stmt->conditions_.swap(bound_where_expressions);
   select_stmt->group_by_.swap(group_by_expressions);
   select_stmt->having_expressions_.swap(bound_having_expressions);
-  stmt                      = select_stmt;
+  stmt = select_stmt;
   return RC::SUCCESS;
 }

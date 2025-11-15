@@ -81,6 +81,9 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
         UPDATE
         LBRACE
         RBRACE
+        INNER
+        JOIN
+        OR
         COMMA
         TRX_BEGIN
         TRX_COMMIT
@@ -127,15 +130,18 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
   vector<AttrInfoSqlNode> *                  attr_infos;
   AttrInfoSqlNode *                          attr_info;
   Expression *                               expression;
+  std::vector<Expression *>*                 raw_expression_lists;
   vector<unique_ptr<Expression>> *           expression_list;
   vector<Value> *                            value_list;
   vector<ConditionSqlNode> *                 condition_list;
   vector<RelAttrSqlNode> *                   rel_attr_list;
   vector<string> *                           relation_list;
+  std::vector<rel_info*>*                    rel_list_type;
   vector<string> *                           key_list;
   char *                                     cstring;
   int                                        number;
   float                                      floats;
+  bool                                       boolean;
 }
 
 %token <number> NUMBER
@@ -156,6 +162,7 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
 %type <attr_info>           attr_def
 %type <value_list>          value_list
 %type <condition_list>      where
+%type <raw_expression_lists>new_where
 %type <condition_list>      condition_list
 %type <expression_list>     having_stmt
 %type <expression>          having_condition
@@ -164,6 +171,11 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
 %type <key_list>            primary_key
 %type <key_list>            attr_list
 %type <relation_list>       rel_list
+%type <rel_list_type>       rel_list_def
+%type <raw_expression_lists>      on_stmt
+%type <expression>          on_condition
+%type <raw_expression_lists> on_condition_list
+%type <boolean>             and_clause
 %type <expression>          expression
 %type <expression_list>     expression_list
 %type <expression_list>     group_by
@@ -486,34 +498,51 @@ update_stmt:      /*  update 语句的语法解析树*/
     }
     ;
 select_stmt:        /*  select 语句的语法解析树*/
-    SELECT expression_list FROM rel_list where group_by having_stmt
+    SELECT expression_list FROM relation rel_list_def new_where group_by having_stmt
     {
       $$ = new ParsedSqlNode(SCF_SELECT);
       if ($2 != nullptr) {
         $$->selection.expressions.swap(*$2);
         delete $2;
       }
-
-      if ($4 != nullptr) {
-        $$->selection.relations.swap(*$4);
-        delete $4;
-      }
-
+      auto &selection = $$->selection;
+      auto r = new rel_info;
+      r->relation_name = $4;
+      // free($4);
+      selection.relations.emplace_back(r);
+      
       if ($5 != nullptr) {
-        $$->selection.conditions.swap(*$5);
+        for(auto iter = $5->rbegin(); iter != $5->rend(); ++iter) {
+          selection.relations.emplace_back(*iter);
+          (*iter) = nullptr;
+        }
         delete $5;
+        // printf("size:%ld.%s\n",selection.relations.size(),selection.relations[0].relation_name.c_str());
       }
 
+      // if ($6 != nullptr) {
+      //   $$->selection.conditions.swap(*$6);
+      //   delete $6;
+      // }
+      // where 
       if ($6 != nullptr) {
-        $$->selection.group_by.swap(*$6);
+        for (auto iter = $6->rbegin(); iter != $6->rend(); ++iter) {
+          selection.conditions.emplace_back(*iter);
+          *iter = nullptr;
+        }
         delete $6;
       }
-      // having
+
       if ($7 != nullptr) {
-        for (auto iter = $7->rbegin(); iter != $7->rend(); ++iter) {
+        $$->selection.group_by.swap(*$7);
+        delete $7;
+      }
+      // having
+      if ($8 != nullptr) {
+        for (auto iter = $7->rbegin(); iter != $8->rend(); ++iter) {
           $$->selection.having.emplace_back((std::move(*iter)));
         }
-        delete $7;
+        delete $8;
       }
     }
     ;
@@ -644,6 +673,79 @@ rel_list:
     }
     ;
 
+rel_list_def:
+  /* empty */ {
+    $$ = nullptr;
+  }
+  | COMMA relation rel_list_def {
+    $$ = ($3 != nullptr ? $3 : new std::vector<rel_info*>());
+  
+    auto r = new rel_info;
+    r->relation_name = string( $2);
+    $$->emplace_back(r);
+    // free($2);
+  }
+  | INNER JOIN relation on_stmt rel_list_def {
+    $$ = ($5 != nullptr ? $5 : new std::vector<rel_info*>());
+    auto r = new rel_info;
+    r->relation_name = $3;
+    // free($3);
+
+    if ($4 != nullptr) {
+      // printf("has on conditions\n");
+      for (size_t i = 0; i < ($4)->size(); ++i) {
+        r->on_conditions.emplace_back((*$4)[i]);
+        // ((*$4)[i]) = nullptr;
+      }
+      std::reverse(r->on_conditions.begin(), r->on_conditions.end());
+      delete $4;
+    }
+    $$->emplace_back(r);
+  }
+  ;
+
+on_stmt:
+  /* empty */ {
+    // cross product
+    $$ = nullptr;
+  }
+  | ON on_condition_list {
+    $$ = $2;
+  }
+  ;
+
+
+on_condition_list:
+  /* empty */ {
+    $$ = nullptr;
+  }
+  | on_condition {
+    $$ = new std::vector<Expression*>;
+    $$->emplace_back($1);
+  }
+  | on_condition and_clause on_condition_list {
+    //TODO
+    $$ = $3;
+    $$->emplace_back($1);
+  }
+  ;
+on_condition:
+  expression comp_op expression {
+    std::unique_ptr<Expression> left($1);
+    std::unique_ptr<Expression> right($3);
+    $$ = new ComparisonExpr($2, std::move(left), std::move(right));
+  }
+  ;
+
+and_clause:
+  AND {
+    $$ = true;
+  }
+  | OR {
+    $$ = false;
+  }
+  ;
+
 where:
     /* empty */
     {
@@ -651,6 +753,15 @@ where:
     }
     | WHERE condition_list {
       $$ = $2;  
+    }
+    ;
+new_where:
+    /* empty */
+    {
+      $$ = nullptr;
+    }
+    | WHERE on_condition_list {
+      $$ = $2;
     }
     ;
 condition_list:

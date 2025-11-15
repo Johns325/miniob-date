@@ -14,6 +14,7 @@ See the Mulan PSL v2 for more details. */
 
 #include "sql/expr/aggregator.h"
 #include "common/log/log.h"
+#include "common/type/attr_type.h"
 
 RC SumAggregator::accumulate(const Value &value)
 {
@@ -21,15 +22,15 @@ RC SumAggregator::accumulate(const Value &value)
     value_ = value;
     return RC::SUCCESS;
   }
-  
+
   ASSERT(value.attr_type() == value_.attr_type(), "type mismatch. value type: %s, value_.type: %s", 
         attr_type_to_string(value.attr_type()), attr_type_to_string(value_.attr_type()));
-  
+
   Value::add(value, value_, value_);
   return RC::SUCCESS;
 }
 
-RC SumAggregator::evaluate(Value& result)
+RC SumAggregator::evaluate(Value &result)
 {
   result = value_;
   return RC::SUCCESS;
@@ -37,7 +38,7 @@ RC SumAggregator::evaluate(Value& result)
 
 RC MinAggregator::accumulate(const Value &value)
 {
-  // Lab2 TODO 
+  // Lab2 TODO
   // 实现 聚合函数MIN的accumulate过程。
   // 要点：传入的值和比较收集到的最小值比较，根据比较结果更新最小值。
   // 你在实现完代码后，请删除最后一行代码 return RC::UNIMPLEMENTED;。
@@ -45,9 +46,9 @@ RC MinAggregator::accumulate(const Value &value)
   return RC::UNIMPLEMENTED;
 }
 
-RC MinAggregator::evaluate(Value& result)
+RC MinAggregator::evaluate(Value &result)
 {
-   // Lab2 TODO 
+  // Lab2 TODO
   // 实现 聚合函数MIN的evaluate过程。
   // 要点：把收集到的最小值保存到输入参数中。
   // 你在实现完代码后，请删除最后一行代码 return RC::UNIMPLEMENTED;。
@@ -57,27 +58,37 @@ RC MinAggregator::evaluate(Value& result)
 
 RC MaxAggregator::accumulate(const Value &value)
 {
-  // Lab2 TODO 
+  // Lab2 TODO
   // 实现 聚合函数MAX的accumulate过程。
   // 要点：传入的值和比较收集到的最大值比较，根据比较结果更新最大值。
   // 你在实现完代码后，请删除最后一行代码 return RC::UNIMPLEMENTED;。
-
-  return RC::UNIMPLEMENTED;
+  if (value_.attr_type() == AttrType::UNDEFINED) {
+    value_ = value;
+    return RC::SUCCESS;
+  }
+  ASSERT(value.attr_type() == value_.attr_type(), "type dismatch. value type: %s, value_.type:%s", 
+        attr_type_to_string(value.attr_type()), attr_type_to_string(value_.attr_type()));
+  auto cmp = value_.compare(value);
+  if (cmp < 0) {
+    value_ = value;
+  }
+  return RC::SUCCESS;
 }
 
-RC MaxAggregator::evaluate(Value& result)
+RC MaxAggregator::evaluate(Value &result)
 {
-  // Lab2 TODO 
+  // Lab2 TODO
   // 实现 聚合函数MAX的evaluate过程。
   // 要点：把收集到的最大值保存到输入参数中。
   // 你在实现完代码后，请删除最后一行代码 return RC::UNIMPLEMENTED;。
 
-  return RC::UNIMPLEMENTED;
+  result = value_;
+  return RC::SUCCESS;
 }
 
 RC AvgAggregator::accumulate(const Value &value)
 {
-  // Lab2 TODO 
+  // Lab2 TODO
   // 实现 聚合函数AVG的accumulate过程。
   // 要点：根据传入的值更新当前收集的总和和输入值个数。
   // 你在实现完代码后，请删除最后一行代码 return RC::UNIMPLEMENTED;。
@@ -85,9 +96,9 @@ RC AvgAggregator::accumulate(const Value &value)
   return RC::UNIMPLEMENTED;
 }
 
-RC AvgAggregator::evaluate(Value& result)
+RC AvgAggregator::evaluate(Value &result)
 {
-  // Lab2 TODO 
+  // Lab2 TODO
   // 实现 聚合函数AVG的evaluate过程。
   // 要点：把收集到的最大值保存到输入参数中。
   // 你在实现完代码后，请删除最后一行代码 return RC::UNIMPLEMENTED;。
@@ -97,7 +108,7 @@ RC AvgAggregator::evaluate(Value& result)
 
 RC CountAggregator::accumulate(const Value &value)
 {
-  // Lab2 TODO 
+  // Lab2 TODO
   // 实现 聚合函数COUNT的accumulate过程。
   // 要点：根据传入的值更新当前收集的计数值。
   // 你在实现完代码后，请删除最后一行代码 return RC::UNIMPLEMENTED;。
@@ -105,9 +116,9 @@ RC CountAggregator::accumulate(const Value &value)
   return RC::UNIMPLEMENTED;
 }
 
-RC CountAggregator::evaluate(Value& result)
+RC CountAggregator::evaluate(Value &result)
 {
-  // Lab2 TODO 
+  // Lab2 TODO
   // 实现 聚合函数COUNT的evaluate过程。
   // 要点：把收集到的计数值保存到输入参数中。
   // 你在实现完代码后，请删除最后一行代码 return RC::UNIMPLEMENTED;。

@@ -60,6 +60,15 @@ RC NestedLoopJoinPhysicalOperator::next()
         return rc;
       }
     }
+    // apply predicates
+    bool pass{false};
+    rc = filter(&joined_tuple_, pass);
+    if (!OB_SUCC(rc)) {
+      return rc;
+    }
+    if (pass) {
+      return RC::SUCCESS;
+    }
   }
   return rc;
 }
@@ -130,4 +139,24 @@ RC NestedLoopJoinPhysicalOperator::right_next()
   right_tuple_ = right_->current_tuple();
   joined_tuple_.set_right(right_tuple_);
   return rc;
+}
+
+RC NestedLoopJoinPhysicalOperator::filter(Tuple* tuple, bool& result) {
+  if (join_predicate_.get() == nullptr) {
+    return RC::SUCCESS;
+  }
+  for (auto& child : dynamic_cast<ConjunctionExpr*>(join_predicate_.get())->children()) {
+    auto cmp_expr = dynamic_cast<ComparisonExpr*>(child.get());
+    Value v;
+    auto rc = cmp_expr->get_value(*tuple, v);
+    if (!OB_SUCC(rc)) {
+      return rc;
+    }
+    if (!v.get_boolean()) {
+      result = false;
+      return RC::SUCCESS;
+    }
+  }
+  result = true;
+  return RC::SUCCESS;
 }

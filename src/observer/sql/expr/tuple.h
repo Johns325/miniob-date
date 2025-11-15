@@ -53,6 +53,14 @@ public:
   int  cell_num() const { return static_cast<int>(cells_.size()); }
 
   const TupleCellSpec &cell_at(int i) const { return cells_[i]; }
+  bool has_cell(const TupleCellSpec &other) {
+    for (auto &cell : cells_) {
+      if (cell.equals(other)) {
+        return true;
+      }
+    }
+    return false;
+  }
 
 private:
   vector<TupleCellSpec> cells_;
@@ -74,6 +82,8 @@ public:
    */
   virtual int cell_num() const = 0;
 
+  virtual RC copy(Tuple*& tuple) = 0;
+
   /**
    * @brief 获取指定位置的Cell
    *
@@ -91,6 +101,7 @@ public:
    * @param[out] cell 返回的cell
    */
   virtual RC find_cell(const TupleCellSpec &spec, Value &cell) const = 0;
+  virtual RC find_cell(const TupleCellSpec &spec, int& index) const { return RC::UNIMPLEMENTED;};
 
   virtual string to_string() const
   {
@@ -161,11 +172,27 @@ public:
   RowTuple() = default;
   virtual ~RowTuple()
   {
-    for (FieldExpr *spec : speces_) {
-      delete spec;
+    if (own_record) {
+      delete record_;
     }
     speces_.clear();
   }
+
+  RC copy(Tuple*& tuple) override {
+    auto row_tuple = new RowTuple();
+    row_tuple->record_ = new Record;
+    row_tuple->own_record = true;
+    row_tuple->record_->copy_data(record_->data(), record_->len());
+    row_tuple->table_ = table_;
+    int field_num = table_->table_meta().field_num();
+    ASSERT(static_cast<size_t>(field_num) == speces_.size(), "They should be equal");
+    for (int i = 0; i < field_num; i++) {
+      row_tuple->speces_.emplace_back(new FieldExpr(table_, table_->table_meta().field(i)));
+    }
+    
+    tuple = row_tuple;
+    return RC::SUCCESS;
+  };
 
   void set_record(Record *record) { this->record_ = record; }
 
@@ -226,6 +253,18 @@ public:
     return RC::NOTFOUND;
   }
 
+  RC find_cell(const TupleCellSpec &spec, int& index) const override {
+    if (string(spec.table_name()) == string(table_->name())) {  
+      for (int i = 0; i < static_cast<int>(speces_.size()); i++) {
+        if (string(spec.field_name()) == string(speces_[i]->field_name())) {
+          index = i;
+          return RC::SUCCESS;
+        }
+      }
+    }
+    return RC::NOTFOUND;
+  }
+
 #if 0
   RC cell_spec_at(int index, const TupleCellSpec *&spec) const override
   {
@@ -246,6 +285,7 @@ private:
   Record             *record_ = nullptr;
   const Table        *table_  = nullptr;
   vector<FieldExpr *> speces_;
+  bool own_record{false};
 };
 
 /**
@@ -259,6 +299,8 @@ class ProjectTuple : public Tuple
 public:
   ProjectTuple()          = default;
   virtual ~ProjectTuple() = default;
+
+  RC copy(Tuple*& tuple) override { return RC::UNIMPLEMENTED;}
 
   void set_expressions(vector<unique_ptr<Expression>> &&expressions) { expressions_ = std::move(expressions); }
 
@@ -314,6 +356,7 @@ class ValueListTuple : public Tuple
 public:
   ValueListTuple()          = default;
   virtual ~ValueListTuple() = default;
+  RC copy(Tuple*& tuple) override { return RC::UNIMPLEMENTED;}
 
   void set_names(const vector<TupleCellSpec> &specs) { specs_ = specs; }
   void set_cells(const vector<Value> &cells) { cells_ = cells; }
@@ -395,6 +438,15 @@ public:
 
   void set_left(Tuple *left) { left_ = left; }
   void set_right(Tuple *right) { right_ = right; }
+  Tuple* left_tuple() { return left_; }
+  Tuple* right_tuple() { return right_; }
+  RC copy(Tuple*& tuple) override { 
+    auto joined_tuple = new JoinedTuple;
+    left_->copy(joined_tuple->left_);
+    right_->copy(joined_tuple->right_);
+    tuple = joined_tuple;
+    return RC::SUCCESS;
+  };
 
   int cell_num() const override { return left_->cell_num() + right_->cell_num(); }
 
@@ -434,6 +486,16 @@ public:
     }
 
     return right_->find_cell(spec, value);
+  }
+
+  RC find_cell(const TupleCellSpec &spec, int& index) const override {
+    if (RC::SUCCESS == left_->find_cell(spec, index)) {
+      return RC::SUCCESS;
+    }
+    if (RC::SUCCESS == right_->find_cell(spec, index)) {
+      return RC::SUCCESS;
+    }
+    return RC::NOTFOUND;
   }
 
 private:

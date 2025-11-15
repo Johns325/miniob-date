@@ -36,6 +36,7 @@ public:
   CompositeTuple(CompositeTuple &&) = default;
   /// @brief 保留移动赋值函数
   CompositeTuple &operator=(CompositeTuple &&) = default;
+  RC copy(Tuple*& tuple) override { return RC::UNIMPLEMENTED;}
 
   int cell_num() const override;
   RC  cell_at(int index, Value &cell) const override;

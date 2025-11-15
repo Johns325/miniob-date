@@ -27,6 +27,7 @@ public:
   Table *find_table(const char *table_name) const;
 
   const vector<Table *> &query_tables() const { return query_tables_; }
+  vector<Table *> &query_tables() { return query_tables_; }
 
 private:
   vector<Table *> query_tables_;
