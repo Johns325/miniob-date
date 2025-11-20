@@ -23,47 +23,17 @@ See the Mulan PSL v2 for more details. */
  * @ingroup PhysicalOperator
  */
 struct HashKeyNode {
-  std::vector<Value> keys;
-  bool operator==(const HashKeyNode& other) const {
-    if (keys.size() != other.keys.size()) {
-      return false;
-    }
-    for (size_t i = 0; i < keys.size(); i++) {
-      if (keys[i].compare(other.keys[i]) != 0) {
-        return false;
-      }
-    }
-    return true;
-  }
+  // LAB3 TODO
+  /*
+    定义用于存储哈希键的结构体成员
+    重载 == 运算符以便 HashKeyNode 可以作为哈希表的键
+  */
 };
 struct HashKeyNodeHasher {
-  std::size_t operator()(const HashKeyNode& node) const {
-    // computes the hash of an employee using a variant
-    // of the Fowler-Noll-Vo hash function
-    constexpr std::uint64_t prime{0x100000001B3};
-    std::uint64_t result{0xcbf29ce484222325};
-    for (auto & key : node.keys) {
-      switch (key.attr_type()) {
-        case AttrType::INTS: {
-          result = (result * prime) ^ std::hash<int>{}(key.get_int());
-        } break;
-        case AttrType::FLOATS: {
-          result = (result * prime) ^ std::hash<float>{}(key.get_float());
-        } break;
-        case AttrType::BOOLEANS: {
-          result = (result * prime) ^ std::hash<bool>{}(key.get_boolean());
-        } break;
-        case AttrType::CHARS: {
-          auto str = key.get_string();
-          for (size_t i = 0; i < str.size(); ++i)
-            result = (result * prime) ^ str[i];
-        } break;
-        default:
-          ASSERT(false, "Unsupported type");
-      }
-    }
-    return result;
-  }
+  // LAB3 TODO
+  /*
+    定义哈希函数以便 HashKeyNode 可以作为哈希表的键
+  */
 };
 
 class HashJoinPhysicalOperator : public PhysicalOperator
@@ -113,10 +83,10 @@ private:
   Tuple            *right_tuple_ = nullptr;
   JoinedTuple       joined_tuple_;         //! 当前关联的左右两个tuple
   
-  std::vector<int> left_key_positions_;
-  std::vector<int> right_key_positions_;
-  unique_ptr<Expression> join_conditions_;
-  std::vector<Tuple*> left_tuples_;
+  std::vector<int> left_key_positions_; // 存储左表哈希键在tuple中的位置
+  std::vector<int> right_key_positions_; // 存储右表哈希键在tuple中的位置
+  unique_ptr<Expression> join_conditions_; // 连接谓词表达式
+  std::vector<Tuple*> left_tuples_; // 存储左表所有的tuple指针
   using hashed_map_t = std::unordered_map<HashKeyNode,size_t, HashKeyNodeHasher>;
-  hashed_map_t hash_table_;
+  hashed_map_t hash_table_; // 哈希表
 };
