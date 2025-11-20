@@ -366,7 +366,18 @@ bool PhysicalPlanGenerator::can_use_hash_join(JoinLogicalOperator &join_oper)
   }
   return all_equal_join;
 }
-
+bool PhysicalPlanGenerator::can_use_hash_join(JoinLogicalOperator &join_oper)
+{
+  // your code here
+  /*
+    HashJoin 只能处理等值连接
+    因此我们要确保 JoinLogicalOperator 上的所有连接谓词都是等值比较
+    1. 从 join_oper 上获取连接谓词表达式列表 join_predicates_
+    2. 遍历每个表达式，检查它们是否都是 ComparisonExpr 且比较操作符为 EQUAL_TO
+    3. 如果发现任何非等值比较，返回 false
+    4. 如果所有表达式都是等值比较，返回 true
+  */
+}
 RC PhysicalPlanGenerator::create_plan(CalcLogicalOperator &logical_oper, unique_ptr<PhysicalOperator> &oper, Session* session)
 {
   RC rc = RC::SUCCESS;

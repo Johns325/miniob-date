@@ -121,6 +121,17 @@ ComparisonExpr::ComparisonExpr(CompOp comp, unique_ptr<Expression> left, unique_
 
 ComparisonExpr::~ComparisonExpr() {}
 
+bool ComparisonExpr::equal(const Expression &other) const
+{
+  if (this == &other) return true;
+  if (other.type() != ExprType::COMPARISON) return false;
+  const auto &o = static_cast<const ComparisonExpr &>(other);
+  if (comp_ != o.comp_) return false;
+  if (!left_->equal(*o.left_)) return false;
+  if (!right_->equal(*o.right_)) return false;
+  return true;
+}
+
 RC ComparisonExpr::compare_value(const Value &left, const Value &right, bool &result) const
 {
   RC  rc         = RC::SUCCESS;
@@ -255,6 +266,19 @@ RC ComparisonExpr::compare_column(const Column &left, const Column &right, vecto
 ConjunctionExpr::ConjunctionExpr(Type type, vector<unique_ptr<Expression>> &children)
     : conjunction_type_(type), children_(std::move(children))
 {}
+
+bool ConjunctionExpr::equal(const Expression &other) const
+{
+  if (this == &other) return true;
+  if (other.type() != ExprType::CONJUNCTION) return false;
+  const auto &o = static_cast<const ConjunctionExpr &>(other);
+  if (conjunction_type_ != o.conjunction_type_) return false;
+  if (children_.size() != o.children_.size()) return false;
+  for (size_t i = 0; i < children_.size(); i++) {
+    if (!children_[i]->equal(*o.children_[i])) return false;
+  }
+  return true;
+}
 
 RC ConjunctionExpr::get_value(const Tuple &tuple, Value &value) const
 {
