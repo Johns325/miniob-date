@@ -25,6 +25,10 @@ Rewriter::Rewriter()
   rewrite_rules_.emplace_back(new ExpressionRewriter);
   rewrite_rules_.emplace_back(new PredicateRewriteRule);
   rewrite_rules_.emplace_back(new PredicatePushdownRewriter);
+  // LAB3 TODO
+  /*
+    将 PredicateToJoinRewriter 添加到重写规则列表中
+  */
 }
 
 RC Rewriter::rewrite(unique_ptr<LogicalOperator> &oper, bool &change_made)

@@ -13,6 +13,7 @@ See the Mulan PSL v2 for more details. */
 #include "common/lang/vector.h"
 #include "sql/optimizer/rewrite_rule.h"
 #include <vector>
+class TableGetLogicalOperator;
 /**
  * @brief 将一些谓词表达式下推到join中
  * @ingroup Rewriter
@@ -26,6 +27,6 @@ public:
   RC rewrite(unique_ptr<LogicalOperator> &oper, bool &change_made) override;
 
 private:
-  
-  // void visitor (LogicalOperator* oper, std::vector<TableGetLogicalOperator*>& table_get_ops); 
+  // helper: collect TableGetLogicalOperator under a subtree
+  void visitor(LogicalOperator* oper, std::vector<TableGetLogicalOperator*>& table_get_ops);
 };

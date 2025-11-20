@@ -297,6 +297,8 @@ public:
   ComparisonExpr(CompOp comp, unique_ptr<Expression> left, unique_ptr<Expression> right);
   virtual ~ComparisonExpr();
 
+  bool equal(const Expression &other) const override;
+
   ExprType type() const override { return ExprType::COMPARISON; }
   RC       get_value(const Tuple &tuple, Value &value) const override;
   AttrType value_type() const override { return AttrType::BOOLEANS; }
@@ -380,6 +382,8 @@ public:
   vector<unique_ptr<Expression>> &children() { return children_; }
 
   void add_child(unique_ptr<Expression>&& child) { children_.emplace_back(std::move(child)); }
+
+  bool equal(const Expression &other) const override;
 
 private:
   Type                           conjunction_type_;

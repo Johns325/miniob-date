@@ -18,72 +18,21 @@ RC HashJoinPhysicalOperator::open(Trx *trx) {
     LOG_WARN("Hash join operator should have 2 children");
     return RC::INTERNAL;
   }
-  for (auto &child : children_) {
-    rc = child->open(trx);
-    if (!OB_SUCC(rc)) {
-      LOG_ERROR("Failed to open child operator:");
-      return rc;
-    }
-  }
-  left_ = children_[0].get();
-  right_ = children_[1].get();
-
-  // TODO 确定好 左表的join key
-  // TupleSchema left_schema;
-  // TupleSchema right_schema;
-  // rc = left_->tuple_schema(left_schema);
-  // if (!OB_SUCC(rc)) {
-  //   LOG_ERROR("Failed to get left child's schema information");
-  //   return rc;
-  // }
-  // rc = right_->tuple_schema(right_schema);
-  // if (!OB_SUCC(rc)) {
-  //   LOG_ERROR("Failed to get right child's schema information");
-  //   return rc;
-  // }
-  
-  std::vector<int> value_positions;
-  bool first_emit_{false};
-  while (RC::SUCCESS == (rc = left_->next())) {
-    auto tuple = left_->current_tuple();
-    if (!first_emit_) {
-      get_hashkey_positions(tuple,left_key_positions_);
-      first_emit_ = true;
-    }
-    HashKeyNode node;
-    extract_hash_keys(tuple, node, left_key_positions_);
-    hash_table_.insert({node, left_tuples_.size()});
-    Tuple * t{nullptr};
-    tuple->copy(t);
-    left_tuples_.emplace_back(t);
-  }
-  if (rc != RC::RECORD_EOF) {
-    return rc;
-  }
+  // LAB3 TODO
+  /*
+    初始化各种成员变量
+    实现 HashJoin 的 Build 阶段
+  */
   return RC::SUCCESS;
 }
 RC HashJoinPhysicalOperator::next() {
   RC rc {RC::SUCCESS};
-  while (RC::SUCCESS == (rc = right_->next())) {
-    auto tuple = right_->current_tuple();
-    if (!right_emited_) {
-      get_hashkey_positions(tuple, right_key_positions_);
-      right_emited_ = true;
-    }
-    HashKeyNode node;
-    extract_hash_keys(tuple, node, right_key_positions_);
-    auto pos = hash_table_.find(node);
-    if (pos != hash_table_.end()) {
-      left_tuple_ = left_tuples_[pos->second];
-      right_tuple_ = tuple;
-      joined_tuple_.set_left(left_tuple_);
-      joined_tuple_.set_right(right_tuple_);
-      return RC::SUCCESS;
-    }
-  }
-  if (RC::RECORD_EOF != rc) {
-    return rc;
-  }
+  // LAB3 TODO
+  /*
+    实现 HashJoin 的 Probe 阶段
+    当找到满足连接条件的左右表记录时，设置 joined_tuple_ 并返回 RC::SUCCESS
+    如果没有更多记录可供连接，返回 RC::RECORD_EOF
+  */
   return RC::RECORD_EOF;
 }
 RC HashJoinPhysicalOperator::close() {
@@ -98,37 +47,10 @@ Tuple * HashJoinPhysicalOperator::current_tuple() {
 }
 
 RC HashJoinPhysicalOperator::get_hashkey_positions(Tuple *tuple, std::vector<int>& key_positions) {
-  for (auto& expr : static_cast<ConjunctionExpr*>(join_conditions_.get())->children()) {
-    ASSERT(expr->type() == ExprType::COMPARISON, "the condition that pred is comparsion expression must be held.");
-    ComparisonExpr* cmp_pred = static_cast<ComparisonExpr*>(expr.get());
-    std::unique_ptr<Expression>& lchild = cmp_pred->left();
-    std::unique_ptr<Expression>& rchild = cmp_pred->right();
-    int index1{-1}, index2{-1};
-    if (lchild->type() == ExprType::FIELD) {
-      auto field_expr = static_cast<FieldExpr*>(lchild.get());
-      TupleCellSpec spec(field_expr->field().table_name(), field_expr->field().field_name());
-      if (OB_SUCC(tuple->find_cell(spec, index1))) {
-        ASSERT(index1 != -1, "Impossible");
-        key_positions.emplace_back(index1);
-      }
-    }
-    if (rchild->type() == ExprType::FIELD) {
-      auto field_expr = static_cast<FieldExpr*>(rchild.get());
-      TupleCellSpec spec(field_expr->field().table_name(), field_expr->field().field_name());
-      if (OB_SUCC(tuple->find_cell(spec, index2))) {
-        ASSERT(index2 != -1, "Impossible");
-        key_positions.emplace_back(index2);
-      }
-    }
-
-    if (lchild->type() == ExprType::FIELD && rchild->type() == ExprType::FIELD) {
-      //
-      if ((index1 != -1 && index2 != -1) || (index1 == -1 && index2 == -1)) {
-        // 同时为-1和同时不为-1都不争取 
-        return RC::INTERNAL;
-      } 
-    }
-  }
+  // LAB3 TODO
+  /*
+    根据 join_conditions_ 提取哈希键在 tuple 中的位置，填充到 key_positions 中
+  */
   return RC::SUCCESS;
 }
 bool HashJoinPhysicalOperator::find_position(const TupleSchema& schemas, TupleCellSpec& spec, int& index) {
@@ -143,12 +65,9 @@ bool HashJoinPhysicalOperator::find_position(const TupleSchema& schemas, TupleCe
 
 RC HashJoinPhysicalOperator::extract_hash_keys(Tuple* tuple, HashKeyNode& node, std::vector<int>& left_key_positions) {
   RC rc{RC::SUCCESS};
-  node.keys.resize(left_key_positions.size());
-  for (size_t i = 0; i < left_key_positions.size(); i++) {
-    rc = tuple->cell_at(left_key_positions[i], node.keys[i]);
-    if (!OB_SUCC(rc)) {
-      return rc;
-    }
-  }
+  // LAB3 TODO
+  /*
+    根据 left_key_positions 从 tuple 中提取哈希键值，填充到 node 中
+  */
   return rc;
 }
