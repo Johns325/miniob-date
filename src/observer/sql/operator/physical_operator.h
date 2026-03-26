@@ -57,6 +57,8 @@ public:
 
   virtual RC tuple_schema(TupleSchema &schema) const { return RC::UNIMPLEMENTED; }
 
+  virtual size_t estimate_output_size() const { return 0; }
+
   void add_child(unique_ptr<PhysicalOperator> oper) { children_.emplace_back(std::move(oper)); }
 
   vector<unique_ptr<PhysicalOperator>> &children() { return children_; }

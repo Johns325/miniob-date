@@ -33,8 +33,13 @@ unique_ptr<LogicalProperty> PredicateLogicalOperator::find_log_prop(const vector
   if (output_card < 1) {
     output_card = 1;  // 至少保留 1 行
   }
-  
-  return make_unique<LogicalProperty>(output_card);
+
+  auto prop = make_unique<LogicalProperty>(output_card);
+  if (!log_props.empty() && log_props[0] != nullptr) {
+    prop->merge_ndv_from(*log_props[0]);
+    prop->cap_ndv_by_card();
+  }
+  return prop;
 }
 
 unique_ptr<LogicalOperator> PredicateLogicalOperator::clone() const

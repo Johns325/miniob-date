@@ -13,8 +13,12 @@ See the Mulan PSL v2 for more details. */
 //
 
 #include "sql/operator/logical/table_get_logical_operator.h"
+
+#include <algorithm>
+
 #include "sql/optimizer/cascade/property.h"
 #include "catalog/catalog.h"
+#include "sql/optimizer/statistics/table_statistics.h"
 
 TableGetLogicalOperator::TableGetLogicalOperator(Table *table, ReadWriteMode mode)
     : LogicalOperator(), table_(table), mode_(mode)
@@ -27,6 +31,8 @@ void TableGetLogicalOperator::set_predicates(vector<unique_ptr<Expression>> &&ex
 
 unique_ptr<LogicalProperty> TableGetLogicalOperator::find_log_prop(const vector<LogicalProperty*> &log_props)
 {
+  (void)log_props;
+
   int card = Catalog::get_instance().get_table_stats(table_->table_id()).row_nums;
   
   // 如果有 predicates，降低 cardinality
@@ -41,8 +47,31 @@ unique_ptr<LogicalProperty> TableGetLogicalOperator::find_log_prop(const vector<
       }
     }
   }
-  
-  return make_unique<LogicalProperty>(card);
+
+  auto prop = make_unique<LogicalProperty>(card);
+
+  // Fill NDV from TableStatistics (may scan table; acceptable for optimizer stats in this project)
+  TableStatistics stats;
+  if (table_ != nullptr && stats.analyze(table_, nullptr) == RC::SUCCESS) {
+    // If catalog row count is unknown, fall back to analyzed row_count.
+    if (prop->get_card() <= 0) {
+      prop->set_card(static_cast<int>(std::max<int64_t>(1, stats.row_count())));
+    }
+    const char *tname = table_->name();
+    const std::string table_name = (tname != nullptr ? std::string(tname) : std::string());
+    for (const auto &kv : stats.ndv_by_column()) {
+      const std::string &col = kv.first;
+      const int64_t ndv      = kv.second;
+      if (!table_name.empty()) {
+        prop->set_ndv(table_name + "." + col, ndv);
+      } else {
+        prop->set_ndv(col, ndv);
+      }
+    }
+    prop->cap_ndv_by_card();
+  }
+
+  return prop;
 }
 
 unique_ptr<LogicalOperator> TableGetLogicalOperator::clone() const

@@ -31,7 +31,15 @@ unique_ptr<LogicalProperty> ProjectLogicalOperator::find_log_prop(const vector<L
       LOG_WARN("find_log_prop: log_prop is nullptr");
     }
   }
-  return make_unique<LogicalProperty>(card);
+
+  auto prop = make_unique<LogicalProperty>(card);
+  for (auto log_prop : log_props) {
+    if (log_prop != nullptr) {
+      prop->merge_ndv_from(*log_prop);
+    }
+  }
+  prop->cap_ndv_by_card();
+  return prop;
 }
 
 unique_ptr<LogicalOperator> ProjectLogicalOperator::clone() const

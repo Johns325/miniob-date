@@ -16,6 +16,14 @@ See the Mulan PSL v2 for more details. */
 
 #include "sql/operator/logical_operator.h"
 
+#include <algorithm>
+#include <functional>
+#include <limits>
+#include <string>
+#include <utility>
+
+#include "common/log/log.h"
+
 /**
  * @brief 连接算子
  * @ingroup LogicalOperator
@@ -86,20 +94,130 @@ public:
 
     LogicalProperty *left_log_prop  = log_props[0];
     LogicalProperty *right_log_prop = log_props[1];
-    int              card           = left_log_prop->get_card() * right_log_prop->get_card();
-    for (auto &predicate : join_predicates_) {
-      if (predicate->type() != ExprType::COMPARISON) {
-        continue;
+
+    const int64_t left_card  = left_log_prop ? static_cast<int64_t>(left_log_prop->get_card()) : 0;
+    const int64_t right_card = right_log_prop ? static_cast<int64_t>(right_log_prop->get_card()) : 0;
+    long double   est_card   = static_cast<long double>(std::max<int64_t>(1, left_card)) *
+                            static_cast<long double>(std::max<int64_t>(1, right_card));
+
+    auto col_key = [](const Expression *expr, std::string &out) -> bool {
+      out.clear();
+      if (expr == nullptr) {
+        return false;
       }
-      auto  pred_expr = dynamic_cast<ComparisonExpr *>(predicate.get());
-      auto &left      = pred_expr->left();
-      auto &right     = pred_expr->right();
-      if (pred_expr->comp() == CompOp::EQUAL_TO && left->type() == ExprType::FIELD &&
-          right->type() == ExprType::FIELD) {
-        card /= std::max(std::max(left_log_prop->get_card(), right_log_prop->get_card()), 1);
+      if (expr->type() == ExprType::FIELD) {
+        auto *f = static_cast<const FieldExpr *>(expr);
+        const char *t = f->table_name();
+        const char *c = f->field_name();
+        if (c == nullptr || *c == '\0') {
+          return false;
+        }
+        if (t != nullptr && *t != '\0') {
+          out = std::string(t) + "." + std::string(c);
+        } else {
+          out = std::string(c);
+        }
+        return true;
+      }
+      if (expr->type() == ExprType::UNBOUND_FIELD) {
+        auto *u = static_cast<const UnboundFieldExpr *>(expr);
+        const char *t = u->table_name();
+        const char *c = u->field_name();
+        if (c == nullptr || *c == '\0') {
+          return false;
+        }
+        if (t != nullptr && *t != '\0') {
+          out = std::string(t) + "." + std::string(c);
+        } else {
+          out = std::string(c);
+        }
+        return true;
+      }
+      return false;
+    };
+
+    // Collect equi-join key pairs (as column keys) from predicates (including conjunction)
+    std::vector<std::pair<std::string, std::string>> equi_keys;
+    std::function<void(const Expression *)> collect = [&](const Expression *expr) {
+      if (expr == nullptr) {
+        return;
+      }
+      if (expr->type() == ExprType::CONJUNCTION) {
+        auto *conj = static_cast<const ConjunctionExpr *>(expr);
+        for (const auto &child : conj->children()) {
+          collect(child.get());
+        }
+        return;
+      }
+      if (expr->type() != ExprType::COMPARISON) {
+        return;
+      }
+      auto *cmp = static_cast<const ComparisonExpr *>(expr);
+      if (cmp->comp() != CompOp::EQUAL_TO) {
+        return;
+      }
+      std::string lk;
+      std::string rk;
+      if (col_key(cmp->left().get(), lk) && col_key(cmp->right().get(), rk)) {
+        equi_keys.emplace_back(std::move(lk), std::move(rk));
+      }
+    };
+    for (const auto &predicate : join_predicates_) {
+      collect(predicate.get());
+    }
+
+    // Estimate cardinality using NDV when possible:
+    // |R ⋈ S| ≈ |R| * |S| / max(NDV(R.a), NDV(S.b)) for equi-join R.a = S.b
+    for (const auto &kv : equi_keys) {
+      const std::string &lk = kv.first;
+      const std::string &rk = kv.second;
+
+      int64_t lndv = 0;
+      int64_t rndv = 0;
+      bool    has_l = left_log_prop && left_log_prop->get_ndv(lk, lndv);
+      bool    has_r = right_log_prop && right_log_prop->get_ndv(rk, rndv);
+
+      if (!has_l) {
+        lndv = std::max<int64_t>(1, left_card);
+      }
+      if (!has_r) {
+        rndv = std::max<int64_t>(1, right_card);
+      }
+
+      const int64_t denom = std::max<int64_t>(1, std::max(lndv, rndv));
+      est_card /= static_cast<long double>(denom);
+    }
+
+    if (est_card < 1) {
+      est_card = 1;
+    }
+    if (est_card > static_cast<long double>(std::numeric_limits<int>::max())) {
+      est_card = static_cast<long double>(std::numeric_limits<int>::max());
+    }
+    auto out_prop = make_unique<LogicalProperty>(static_cast<int>(est_card));
+
+    // Propagate NDVs from children
+    if (left_log_prop != nullptr) {
+      out_prop->merge_ndv_from(*left_log_prop);
+    }
+    if (right_log_prop != nullptr) {
+      out_prop->merge_ndv_from(*right_log_prop);
+    }
+
+    // For join keys, NDV after equi-join becomes min(NDV(left), NDV(right)) when both available.
+    for (const auto &kv : equi_keys) {
+      int64_t lndv = 0;
+      int64_t rndv = 0;
+      const bool has_l = left_log_prop && left_log_prop->get_ndv(kv.first, lndv);
+      const bool has_r = right_log_prop && right_log_prop->get_ndv(kv.second, rndv);
+      if (has_l && has_r) {
+        const int64_t out_ndv = std::max<int64_t>(1, std::min(lndv, rndv));
+        out_prop->set_ndv(kv.first, out_ndv);
+        out_prop->set_ndv(kv.second, out_ndv);
       }
     }
-    return make_unique<LogicalProperty>(card);
+    out_prop->cap_ndv_by_card();
+    return out_prop;
   }
 
 private:

@@ -14,10 +14,47 @@ See the Mulan PSL v2 for more details. */
 
 #include "sql/operator/physical/table_scan_physical_operator.h"
 #include "event/sql_debug.h"
+#include "catalog/catalog.h"
+#include "storage/buffer/page.h"
 #include "storage/table/table.h"
 #include "sql/optimizer/optimizer_utils.h"
 
 using namespace std;
+
+size_t TableScanPhysicalOperator::estimate_output_size() const
+{
+  if (table_ == nullptr) {
+    return 0;
+  }
+  const int rows = Catalog::get_instance().get_table_stats(table_->table_id()).row_nums;
+  return rows < 0 ? 0 : static_cast<size_t>(rows);
+}
+
+double TableScanPhysicalOperator::calculate_cost(
+    LogicalProperty *prop, const vector<LogicalProperty *> &child_log_props, CostModel *cm)
+{
+  (void)child_log_props;
+  if (cm == nullptr || table_ == nullptr) {
+    return 0.0;
+  }
+
+  int64_t rows = static_cast<int64_t>(Catalog::get_instance().get_table_stats(table_->table_id()).row_nums);
+  if (rows <= 0 && prop != nullptr) {
+    rows = prop->get_card();
+  }
+  if (rows < 0) {
+    rows = 0;
+  }
+
+  const int record_size = table_->table_meta().record_size();
+  int64_t pages = 0;
+  if (rows > 0 && record_size > 0) {
+    const int64_t bytes = rows * static_cast<int64_t>(record_size);
+    pages               = (bytes + BP_PAGE_DATA_SIZE - 1) / BP_PAGE_DATA_SIZE;
+  }
+
+  return cm->seq_page_cost() * static_cast<double>(pages) + cm->cpu_tuple_cost() * static_cast<double>(rows);
+}
 
 RC TableScanPhysicalOperator::open(Trx *trx)
 {
