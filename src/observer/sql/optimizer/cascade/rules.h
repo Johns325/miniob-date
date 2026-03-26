@@ -24,6 +24,9 @@ enum class RuleType : uint32_t
   PREDICATE_REWRITE,    // 谓词重写（删除恒真/恒假谓词）
   EXPRESSION_SIMPLIFY,  // 表达式简化
 
+  JOIN_COMMUTATIVITY,   // Join 交换律
+  JOIN_ASSOCIATIVITY,   // Join 结合律
+
   // Don't move this one
   LogicalPhysicalDelimiter,
 

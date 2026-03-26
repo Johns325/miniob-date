@@ -32,6 +32,9 @@ public:
 
   inline double cpu_op() { return CPU_OP; }
 
+  // Common CBO naming
+  inline double cpu_tuple_cost() { return CPU_OP; }
+
   ///< cpu cost of building hash table
   inline double hash_cost() { return HASH_COST; }
 
@@ -43,6 +46,9 @@ public:
 
   ///< i/o cost
   inline double io() { return IO; }
+
+  // Common CBO naming
+  inline double seq_page_cost() { return IO; }
 
   double calculate_cost(Memo *memo, GroupExpr *gexpr);
 

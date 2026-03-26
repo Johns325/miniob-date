@@ -14,6 +14,7 @@ See the Mulan PSL v2 for more details. */
 #include "sql/optimizer/cascade/memo.h"
 #include "sql/operator/logical/predicate_logical_operator.h"
 #include "sql/operator/logical/table_get_logical_operator.h"
+#include "sql/operator/logical/join_logical_operator.h"
 #include "sql/operator/logical/empty_logical_operator.h"
 #include "sql/expr/expression.h"
 
@@ -232,5 +233,110 @@ bool ExpressionSimplifyRule::simplify_expression(unique_ptr<Expression> &expr) c
   }
 
   return changed;
+}
+
+// -------------------------------------------------------------------------------------------------
+// JoinCommutativityRule
+// -------------------------------------------------------------------------------------------------
+JoinCommutativityRule::JoinCommutativityRule()
+{
+  type_          = RuleType::JOIN_COMMUTATIVITY;
+  match_pattern_ = unique_ptr<Pattern>(new Pattern(OpType::LOGICALINNERJOIN));
+  auto left      = new Pattern(OpType::LEAF);
+  auto right     = new Pattern(OpType::LEAF);
+  match_pattern_->add_child(left);
+  match_pattern_->add_child(right);
+}
+
+void JoinCommutativityRule::transform(
+    GroupExpr *input, std::vector<CandidateExpression> *transformed, OptimizerContext *context) const
+{
+  (void)context;
+  ASSERT(input->get_children_groups_size() == 2, "join should have 2 children");
+  if (input->get_op()->get_op_type() != OpType::LOGICALINNERJOIN) {
+    return;
+  }
+
+  auto join_oper = static_cast<JoinLogicalOperator *>(input->get_op());
+  auto new_join  = join_oper->clone();
+
+  const auto &child_ids = input->get_child_group_ids();
+  transformed->emplace_back(std::move(new_join), std::vector<int>{child_ids[1], child_ids[0]});
+}
+
+// -------------------------------------------------------------------------------------------------
+// JoinAssociativityRule
+// -------------------------------------------------------------------------------------------------
+JoinAssociativityRule::JoinAssociativityRule()
+{
+  type_          = RuleType::JOIN_ASSOCIATIVITY;
+  match_pattern_ = unique_ptr<Pattern>(new Pattern(OpType::LOGICALINNERJOIN));
+
+  // Match: Join( Join(A, B), C )
+  auto left_join = new Pattern(OpType::LOGICALINNERJOIN);
+  left_join->add_child(new Pattern(OpType::LEAF));
+  left_join->add_child(new Pattern(OpType::LEAF));
+  auto right = new Pattern(OpType::LEAF);
+
+  match_pattern_->add_child(left_join);
+  match_pattern_->add_child(right);
+}
+
+void JoinAssociativityRule::transform(
+    GroupExpr *input, std::vector<CandidateExpression> *transformed, OptimizerContext *context) const
+{
+  ASSERT(input->get_children_groups_size() == 2, "join should have 2 children");
+  if (input->get_op()->get_op_type() != OpType::LOGICALINNERJOIN) {
+    return;
+  }
+
+  // Current shape: Join( left_group, c_group )
+  const int left_group_id = input->get_child_group_id(0);
+  const int c_group_id    = input->get_child_group_id(1);
+
+  Memo  &memo       = context->get_memo();
+  Group *left_group = memo.get_group_by_id(left_group_id);
+  if (left_group == nullptr) {
+    return;
+  }
+
+  // The left child is a GROUP, which may contain multiple logical expressions after
+  // commutativity (and other) transformations. Try each Join(A,B) logical expression.
+  const auto &left_logical_exprs = left_group->get_logical_expressions();
+  for (GroupExpr *left_gexpr : left_logical_exprs) {
+    if (left_gexpr == nullptr || left_gexpr->get_op()->get_op_type() != OpType::LOGICALINNERJOIN) {
+      continue;
+    }
+    if (left_gexpr->get_children_groups_size() != 2) {
+      continue;
+    }
+
+    // left_gexpr shape: Join(A, B)
+    const int a_group_id = left_gexpr->get_child_group_id(0);
+    const int b_group_id = left_gexpr->get_child_group_id(1);
+
+    // Build inner join: Join(B, C) with empty predicates (safe, predicates can stay on top join)
+    auto inner_join = make_unique<JoinLogicalOperator>();
+    CandidateExpression inner_candidate(std::move(inner_join), std::vector<int>{b_group_id, c_group_id});
+
+    GroupExpr *inner_gexpr = nullptr;
+    context->record_node_into_group(inner_candidate, &inner_gexpr);
+    if (inner_gexpr == nullptr) {
+      continue;
+    }
+    const int bc_group_id = inner_gexpr->get_group_id();
+
+    // Build new top join: Join(A, (B join C))
+    auto top_join = static_cast<JoinLogicalOperator *>(input->get_op())->clone();
+    auto *top_ptr = static_cast<JoinLogicalOperator *>(top_join.get());
+
+    // Move predicates from (A join B) up to the new top join to preserve semantics.
+    auto *ab_join = static_cast<JoinLogicalOperator *>(left_gexpr->get_op());
+    for (auto &pred : ab_join->get_join_predicates()) {
+      top_ptr->add_join_predicate(pred->copy());
+    }
+
+    transformed->emplace_back(std::move(top_join), std::vector<int>{a_group_id, bc_group_id});
+  }
 }
 

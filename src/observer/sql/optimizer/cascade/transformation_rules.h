@@ -56,3 +56,19 @@ private:
   // Simplify expression, returns true if changed
   bool simplify_expression(unique_ptr<Expression> &expr) const;
 };
+
+class JoinCommutativityRule : public Rule
+{
+public:
+  JoinCommutativityRule();
+  void transform(
+      GroupExpr *input, std::vector<CandidateExpression> *transformed, OptimizerContext *context) const override;
+};
+
+class JoinAssociativityRule : public Rule
+{
+public:
+  JoinAssociativityRule();
+  void transform(
+      GroupExpr *input, std::vector<CandidateExpression> *transformed, OptimizerContext *context) const override;
+};

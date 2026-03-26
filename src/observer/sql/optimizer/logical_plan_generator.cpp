@@ -92,6 +92,7 @@ RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, GroupExpr *&root_g
 
   // 1. 创建table get和join
   const vector<Table *> &tables = select_stmt->tables();
+  size_t table_idx = 0;
   for (Table *table : tables) {
     unique_ptr<OperatorNode> table_get_op(new TableGetLogicalOperator(table, ReadWriteMode::READ_ONLY));
     GroupExpr *table_get_gexpr = nullptr;
@@ -102,6 +103,12 @@ RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, GroupExpr *&root_g
     } else {
       // 创建join
       unique_ptr<OperatorNode> join_op(new JoinLogicalOperator);
+      if (select_stmt->join_expres_.size() > table_idx) {
+        auto &join_expr = select_stmt->join_expres_[table_idx];
+        if (join_expr) {
+          static_cast<JoinLogicalOperator *>(join_op.get())->add_join_predicate(std::move(join_expr));
+        }
+      }
       std::vector<int> child_groups = {last_gexpr->get_group_id(), table_get_gexpr->get_group_id()};
       CandidateExpression candidate(std::move(join_op), std::move(child_groups));
       context->record_node_into_group(candidate, &last_gexpr);
@@ -109,13 +116,29 @@ RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, GroupExpr *&root_g
   }
 
   // 2. 创建filter/predicate
-  if (select_stmt->filter_stmt()) {
-    // 先创建predicate的expressions
-    RC rc = create_plan(select_stmt->filter_stmt(), last_gexpr, context, last_gexpr->get_group_id());
-    if (OB_FAIL(rc)) {
-      LOG_WARN("failed to create predicate logical plan. rc=%s", strrc(rc));
-      return rc;
+  // if (select_stmt->filter_stmt()) {
+  //   // legacy path
+  //   RC rc = create_plan(select_stmt->filter_stmt(), last_gexpr, context, last_gexpr->get_group_id());
+  //   if (OB_FAIL(rc)) {
+  //     LOG_WARN("failed to create predicate logical plan. rc=%s", strrc(rc));
+  //     return rc;
+  //   }
+  // }
+  if (!select_stmt->conditions_.empty()) {
+    // New path: build predicate from SelectStmt::conditions_ (already bound expressions)
+    unique_ptr<Expression> predicate;
+    if (select_stmt->conditions_.size() == 1) {
+      predicate = std::move(select_stmt->conditions_[0]);
+      select_stmt->conditions_.clear();
+    } else {
+      vector<unique_ptr<Expression>> conjuncts;
+      conjuncts.swap(select_stmt->conditions_);
+      predicate = make_unique<ConjunctionExpr>(ConjunctionExpr::Type::AND, conjuncts);
     }
+
+    unique_ptr<OperatorNode> predicate_oper(new PredicateLogicalOperator(std::move(predicate)));
+    CandidateExpression      candidate(std::move(predicate_oper), {last_gexpr->get_group_id()});
+    context->record_node_into_group(candidate, &last_gexpr);
   }
 
   // 3. 创建group by（检查是否有group by或聚合函数）
@@ -134,82 +157,17 @@ RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, GroupExpr *&root_g
 
 RC LogicalPlanGenerator::create_plan(FilterStmt *filter_stmt, GroupExpr *&root_gexpr, OptimizerContext *context, int gid)
 {
-  RC                                  rc = RC::SUCCESS;
-  vector<unique_ptr<Expression>> cmp_exprs;
-  const vector<FilterUnit *>    &filter_units = filter_stmt->filter_units();
-  for (const FilterUnit *filter_unit : filter_units) {
-    const FilterObj &filter_obj_left  = filter_unit->left();
-    const FilterObj &filter_obj_right = filter_unit->right();
+  RC rc = RC::SUCCESS;
 
-    unique_ptr<Expression> left(filter_obj_left.is_attr
-                                    ? static_cast<Expression *>(new FieldExpr(filter_obj_left.field))
-                                    : static_cast<Expression *>(new ValueExpr(filter_obj_left.value)));
-
-    unique_ptr<Expression> right(filter_obj_right.is_attr
-                                     ? static_cast<Expression *>(new FieldExpr(filter_obj_right.field))
-                                     : static_cast<Expression *>(new ValueExpr(filter_obj_right.value)));
-
-    if (left->value_type() != right->value_type()) {
-      auto left_to_right_cost = implicit_cast_cost(left->value_type(), right->value_type());
-      auto right_to_left_cost = implicit_cast_cost(right->value_type(), left->value_type());
-      if (left_to_right_cost <= right_to_left_cost && left_to_right_cost != INT32_MAX) {
-        ExprType left_type = left->type();
-        auto cast_expr = make_unique<CastExpr>(std::move(left), right->value_type());
-        if (left_type == ExprType::VALUE) {
-          Value left_val;
-          if (OB_FAIL(rc = cast_expr->try_get_value(left_val)))
-          {
-            LOG_WARN("failed to get value from left child", strrc(rc));
-            return rc;
-          }
-          left = make_unique<ValueExpr>(left_val);
-        } else {
-          left = std::move(cast_expr);
-        }
-      } else if (right_to_left_cost < left_to_right_cost && right_to_left_cost != INT32_MAX) {
-        ExprType right_type = right->type();
-        auto cast_expr = make_unique<CastExpr>(std::move(right), left->value_type());
-        if (right_type == ExprType::VALUE) {
-          Value right_val;
-          if (OB_FAIL(rc = cast_expr->try_get_value(right_val)))
-          {
-            LOG_WARN("failed to get value from right child", strrc(rc));
-            return rc;
-          }
-          right = make_unique<ValueExpr>(right_val);
-        } else {
-          right = std::move(cast_expr);
-        }
-
-      } else {
-        rc = RC::UNSUPPORTED;
-        LOG_WARN("unsupported cast from %s to %s", attr_type_to_string(left->value_type()), attr_type_to_string(right->value_type()));
-        return rc;
-      }
-    }
-
-    ComparisonExpr *cmp_expr = new ComparisonExpr(filter_unit->comp(), std::move(left), std::move(right));
-    cmp_exprs.emplace_back(cmp_expr);
+  Expression *predicate = filter_stmt->predicate();
+  if (predicate == nullptr) {
+    return RC::SUCCESS;
   }
 
-  unique_ptr<OperatorNode> predicate_oper;
-  if (cmp_exprs.size() == 1) {
-    predicate_oper = unique_ptr<OperatorNode>(new PredicateLogicalOperator(std::move(cmp_exprs[0])));
-  } else if(!cmp_exprs.empty()) {
-    unique_ptr<ConjunctionExpr> conjunction_expr(new ConjunctionExpr(ConjunctionExpr::Type::AND, cmp_exprs));
-    predicate_oper = unique_ptr<OperatorNode>(new PredicateLogicalOperator(std::move(conjunction_expr)));
-  }
+  unique_ptr<OperatorNode> predicate_oper(new PredicateLogicalOperator(predicate->copy()));
   CandidateExpression candidate(std::move(predicate_oper), {gid});
   context->record_node_into_group(candidate, &root_gexpr);
   return rc;
-}
-
-int LogicalPlanGenerator::implicit_cast_cost(AttrType from, AttrType to)
-{
-  if (from == to) {
-    return 0;
-  }
-  return DataType::type_instance(from)->cast_cost(to);
 }
 
 RC LogicalPlanGenerator::create_plan(InsertStmt *insert_stmt, GroupExpr *&root_gexpr, OptimizerContext *context)

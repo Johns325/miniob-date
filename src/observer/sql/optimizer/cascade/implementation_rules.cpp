@@ -309,7 +309,13 @@ void LogicalInnerJoinToNestedLoopJoin::transform(
 {
   ASSERT(input->get_children_groups_size() == 2, "join should have 2 children");
 
-  auto nl_join_oper = make_unique<NestedLoopJoinPhysicalOperator>();
+  auto join_oper = static_cast<JoinLogicalOperator *>(input->get_op());
+  vector<unique_ptr<Expression>> join_predicates;
+  for (auto &pred : join_oper->get_join_predicates()) {
+    join_predicates.emplace_back(pred->copy());
+  }
+
+  auto nl_join_oper = make_unique<NestedLoopJoinPhysicalOperator>(std::move(join_predicates));
   transformed->emplace_back(std::move(nl_join_oper), input->get_child_group_ids());
 }
 
@@ -331,10 +337,55 @@ void LogicalInnerJoinToHashJoin::transform(
 {
   ASSERT(input->get_children_groups_size() == 2, "join should have 2 children");
 
-  // TODO: HashJoinPhysicalOperator is currently empty, needs implementation
-  // Temporarily disabled, enable after implementation
-  // auto hash_join_oper = make_unique<HashJoinPhysicalOperator>();
-  // transformed->emplace_back(std::move(hash_join_oper), input->get_child_group_ids());
+  auto join_oper = static_cast<JoinLogicalOperator *>(input->get_op());
+
+  // HashJoinPhysicalOperator requires at least one equality predicate to build hash keys.
+  // For cartesian products or non-equi joins, don't generate hash join candidates.
+  const auto &log_preds = join_oper->get_join_predicates();
+  if (log_preds.empty()) {
+    return;
+  }
+
+  // Hash join can still evaluate non-equi predicates as residuals, but it must have
+  // at least one equality comparison to build hash keys.
+  std::function<bool(const Expression *)> has_equi = [&](const Expression *expr) -> bool {
+    if (expr == nullptr) {
+      return false;
+    }
+    if (expr->type() == ExprType::CONJUNCTION) {
+      auto *conj = static_cast<const ConjunctionExpr *>(expr);
+      for (const auto &child : conj->children()) {
+        if (has_equi(child.get())) {
+          return true;
+        }
+      }
+      return false;
+    }
+    if (expr->type() != ExprType::COMPARISON) {
+      return false;
+    }
+    auto *cmp = static_cast<const ComparisonExpr *>(expr);
+    return cmp->comp() == CompOp::EQUAL_TO;
+  };
+
+  bool can_hash_join = false;
+  for (const auto &pred : log_preds) {
+    if (has_equi(pred.get())) {
+      can_hash_join = true;
+      break;
+    }
+  }
+  if (!can_hash_join) {
+    return;
+  }
+
+  vector<unique_ptr<Expression>> join_predicates;
+  for (auto &pred : log_preds) {
+    join_predicates.emplace_back(pred->copy());
+  }
+
+  auto hash_join_oper = make_unique<HashJoinPhysicalOperator>(std::move(join_predicates));
+  transformed->emplace_back(std::move(hash_join_oper), input->get_child_group_ids());
 }
 
 // -------------------------------------------------------------------------------------------------

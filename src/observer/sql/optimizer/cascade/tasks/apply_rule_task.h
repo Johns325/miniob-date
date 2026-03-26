@@ -26,6 +26,7 @@ public:
   RC perform() override;
 
 private:
+  bool checkDuplicate(const CandidateExpression &candidate, int target_group);
   GroupExpr *group_expr_;
   Rule      *rule_;
 };

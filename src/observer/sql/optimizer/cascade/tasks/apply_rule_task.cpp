@@ -14,6 +14,8 @@ See the Mulan PSL v2 for more details. */
 #include "sql/optimizer/cascade/group_expr.h"
 #include "sql/optimizer/cascade/rules.h"
 #include "common/log/log.h"
+#include "sql/optimizer/cascade/memo.h"
+#include "sql/optimizer/cascade/group.h"
 
 RC ApplyRule::perform()
 {
@@ -29,7 +31,9 @@ RC ApplyRule::perform()
   for (auto &candidate : after) {
     GroupExpr *new_gexpr = nullptr;
     auto g_id = group_expr_->get_group_id();
-    if(context_->record_node_into_group(candidate, &new_gexpr, g_id)) {
+    // Note: record_node_into_group will not check if the same expression already exists,
+    // so we need check it manually.
+    if(!checkDuplicate(candidate, g_id) && context_->record_node_into_group(candidate, &new_gexpr, g_id)) {
       if (new_gexpr->get_op()->is_logical()) {
         // further optimize new expr
         push_task(new OptimizeExpression(new_gexpr, context_));
@@ -39,10 +43,23 @@ RC ApplyRule::perform()
       }
     } else {
       LOG_DEBUG("record_operator_node_into_group not insert new expr");
-      new_gexpr->dump();
+      // new_gexpr->dump();
     }
   }
 
   group_expr_->set_rule_explored(rule_);
   return RC::SUCCESS;
+}
+
+bool ApplyRule::checkDuplicate(const CandidateExpression &candidate, int target_group)
+{
+  Memo &memo = context_->get_memo();
+  auto group = memo.get_group_by_id(target_group);
+  auto expressions = candidate.op->is_logical() ? group->get_logical_expressions() : group->get_physical_expressions();
+  for (const auto &expr : expressions) {
+    if (expr->get_op()->get_op_type() == candidate.op->get_op_type() && expr->get_child_group_ids() == candidate.child_group_ids) {
+      return true;
+    }
+  }
+  return false;
 }

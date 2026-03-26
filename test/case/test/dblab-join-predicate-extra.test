@@ -1,0 +1,48 @@
+-- echo initialization
+CREATE TABLE jp_t1(id int, v int);
+CREATE TABLE jp_t2(id int, v int);
+CREATE TABLE jp_t3(id int, v int);
+CREATE TABLE jp_empty(id int, v int);
+
+-- echo data
+INSERT INTO jp_t1 VALUES (1, 10);
+INSERT INTO jp_t1 VALUES (1, 11);
+INSERT INTO jp_t1 VALUES (2, 20);
+INSERT INTO jp_t1 VALUES (3, 30);
+
+INSERT INTO jp_t2 VALUES (1, 100);
+INSERT INTO jp_t2 VALUES (1, 101);
+INSERT INTO jp_t2 VALUES (2, 200);
+INSERT INTO jp_t2 VALUES (4, 400);
+
+INSERT INTO jp_t3 VALUES (1, 1000);
+INSERT INTO jp_t3 VALUES (3, 3000);
+
+-- echo 1. cartesian join (must be NLJ)
+-- ensure:nlj SELECT * FROM jp_t1, jp_t2;
+-- sort SELECT * FROM jp_t1, jp_t2;
+
+-- echo 2. non-equi join only (must be NLJ)
+-- ensure:nlj SELECT * FROM jp_t1 INNER JOIN jp_t2 ON jp_t1.id < jp_t2.id;
+-- sort SELECT * FROM jp_t1 INNER JOIN jp_t2 ON jp_t1.id < jp_t2.id;
+
+-- echo 3. equi join with duplicates (result correctness)
+-- sort SELECT * FROM jp_t1 INNER JOIN jp_t2 ON jp_t1.id = jp_t2.id;
+
+-- echo 4. equi join + residual predicate in ON
+-- sort SELECT * FROM jp_t1 INNER JOIN jp_t2 ON jp_t1.id = jp_t2.id AND jp_t1.v < jp_t2.v;
+
+-- echo 5. equi join + residual predicate in WHERE
+-- sort SELECT * FROM jp_t1 INNER JOIN jp_t2 ON jp_t1.id = jp_t2.id WHERE jp_t1.v < jp_t2.v;
+
+-- echo 6. 3-way join: one equi + one non-equi (should contain both join types)
+-- sort SELECT * FROM jp_t1 INNER JOIN jp_t2 ON jp_t1.id = jp_t2.id INNER JOIN jp_t3 ON jp_t1.id < jp_t3.id;
+
+-- echo 7. 3-way join: two equi joins
+-- sort SELECT * FROM jp_t1 INNER JOIN jp_t2 ON jp_t1.id = jp_t2.id INNER JOIN jp_t3 ON jp_t1.id = jp_t3.id;
+
+-- echo 8. join with empty table
+-- sort SELECT * FROM jp_t1 INNER JOIN jp_empty ON jp_t1.id = jp_empty.id;
+
+-- echo 9. empty build/probe sides (also should not crash)
+-- sort SELECT * FROM jp_empty INNER JOIN jp_t1 ON jp_empty.id = jp_t1.id;

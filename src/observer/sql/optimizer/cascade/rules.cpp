@@ -20,6 +20,8 @@ RuleSet::RuleSet()
   add_rule(RuleSetName::LOGICAL_TRANSFORMATION, new PredicatePushdownRule());
   add_rule(RuleSetName::LOGICAL_TRANSFORMATION, new PredicateRewriteRule());
   add_rule(RuleSetName::LOGICAL_TRANSFORMATION, new ExpressionSimplifyRule());
+  add_rule(RuleSetName::LOGICAL_TRANSFORMATION, new JoinCommutativityRule());
+  add_rule(RuleSetName::LOGICAL_TRANSFORMATION, new JoinAssociativityRule());
   auto &trans_rules = get_rules_by_name(RuleSetName::LOGICAL_TRANSFORMATION);
   std::sort(trans_rules.begin(), trans_rules.end(), [](Rule* a, Rule* b){
     return static_cast<int>(a->get_type()) > static_cast<int>(b->get_type());
@@ -36,7 +38,7 @@ RuleSet::RuleSet()
   add_rule(RuleSetName::PHYSICAL_IMPLEMENTATION, new LogicalPredicateToPredicate());
   add_rule(RuleSetName::PHYSICAL_IMPLEMENTATION, new LogicalInnerJoinToNestedLoopJoin());
   // TODO: Enable after HashJoinPhysicalOperator is implemented
-  // add_rule(RuleSetName::PHYSICAL_IMPLEMENTATION, new LogicalInnerJoinToHashJoin());
+  add_rule(RuleSetName::PHYSICAL_IMPLEMENTATION, new LogicalInnerJoinToHashJoin());
   add_rule(RuleSetName::PHYSICAL_IMPLEMENTATION, new LogicalGroupByToAggregation());
   add_rule(RuleSetName::PHYSICAL_IMPLEMENTATION, new LogicalGroupByToHashGroupBy());
   add_rule(RuleSetName::PHYSICAL_IMPLEMENTATION, new LogicalEmptyToEmpty());
