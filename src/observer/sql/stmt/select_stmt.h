@@ -22,7 +22,7 @@ class FieldMeta;
 class FilterStmt;
 class Db;
 class Table;
-
+class ConjunctionExpr;
 /**
  * @brief 表示select语句
  * @ingroup Statement
@@ -30,6 +30,7 @@ class Table;
 class SelectStmt : public Stmt
 {
 public:
+  friend class LogicalPlanGenerator;
   SelectStmt() = default;
   ~SelectStmt() override;
 
@@ -48,6 +49,8 @@ public:
 private:
   vector<unique_ptr<Expression>> query_expressions_;
   vector<Table *>                tables_;
+  std::vector<std::unique_ptr<ConjunctionExpr>> join_expres_;
+  std::vector<unique_ptr<Expression>>           conditions_;
   FilterStmt                    *filter_stmt_ = nullptr;
   vector<unique_ptr<Expression>> group_by_;
 };

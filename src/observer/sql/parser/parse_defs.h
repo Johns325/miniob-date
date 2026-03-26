@@ -75,6 +75,26 @@ struct ConditionSqlNode
   Value          right_value;    ///< right-hand side value if right_is_attr = FALSE
 };
 
+struct rel_info
+{
+  std::string                              relation_name;
+  std::string                              relation_alias;
+  std::vector<std::unique_ptr<Expression>> on_conditions;  // join conditions. i.e. A.id = B.id
+  rel_info()          = default;
+  virtual ~rel_info() = default;
+  rel_info(const rel_info &other);
+  rel_info(rel_info &&other);
+  rel_info &operator=(rel_info &&other)
+  {
+    relation_name  = std::move(other.relation_name);
+    relation_alias = std::move(other.relation_alias);
+    if (!on_conditions.empty()) {
+      on_conditions.swap(other.on_conditions);
+    }
+    return *this;
+  }
+};
+
 /**
  * @brief 描述一个select语句
  * @ingroup SQLParser
@@ -89,9 +109,9 @@ struct ConditionSqlNode
 struct SelectSqlNode
 {
   vector<unique_ptr<Expression>> expressions;  ///< 查询的表达式
-  vector<string>                 relations;    ///< 查询的表
-  vector<ConditionSqlNode>       conditions;   ///< 查询条件，使用AND串联起来多个条件
-  vector<unique_ptr<Expression>> group_by;     ///< group by clause
+  vector<unique_ptr<rel_info>>   relations; ///< 查询的表，可以是多个表的连接
+  vector<unique_ptr<Expression>> where;     ///< where clause predicate expression
+  vector<unique_ptr<Expression>> group_by;  ///< group by clause
 };
 
 /**
@@ -120,8 +140,8 @@ struct InsertSqlNode
  */
 struct DeleteSqlNode
 {
-  string                   relation_name;  ///< Relation to delete from
-  vector<ConditionSqlNode> conditions;
+  string                 relation_name;  ///< Relation to delete from
+  unique_ptr<Expression> where;
 };
 
 /**
@@ -130,10 +150,10 @@ struct DeleteSqlNode
  */
 struct UpdateSqlNode
 {
-  string                   relation_name;   ///< Relation to update
-  string                   attribute_name;  ///< 更新的字段，仅支持一个字段
-  Value                    value;           ///< 更新的值，仅支持一个字段
-  vector<ConditionSqlNode> conditions;
+  string                 relation_name;   ///< Relation to update
+  string                 attribute_name;  ///< 更新的字段，仅支持一个字段
+  Value                  value;           ///< 更新的值，仅支持一个字段
+  unique_ptr<Expression> where;
 };
 
 /**

@@ -15,7 +15,6 @@ See the Mulan PSL v2 for more details. */
 #pragma once
 
 #include "common/lang/unordered_map.h"
-#include "common/lang/vector.h"
 #include "sql/expr/expression.h"
 #include "sql/parser/parse_defs.h"
 #include "sql/stmt/stmt.h"
@@ -23,47 +22,6 @@ See the Mulan PSL v2 for more details. */
 class Db;
 class Table;
 class FieldMeta;
-
-struct FilterObj
-{
-  bool  is_attr;
-  Field field;
-  Value value;
-
-  void init_attr(const Field &field)
-  {
-    is_attr     = true;
-    this->field = field;
-  }
-
-  void init_value(const Value &value)
-  {
-    is_attr     = false;
-    this->value = value;
-  }
-};
-
-class FilterUnit
-{
-public:
-  FilterUnit() = default;
-  ~FilterUnit() {}
-
-  void set_comp(CompOp comp) { comp_ = comp; }
-
-  CompOp comp() const { return comp_; }
-
-  void set_left(const FilterObj &obj) { left_ = obj; }
-  void set_right(const FilterObj &obj) { right_ = obj; }
-
-  const FilterObj &left() const { return left_; }
-  const FilterObj &right() const { return right_; }
-
-private:
-  CompOp    comp_ = NO_OP;
-  FilterObj left_;
-  FilterObj right_;
-};
 
 /**
  * @brief Filter/谓词/过滤语句
@@ -73,18 +31,17 @@ class FilterStmt
 {
 public:
   FilterStmt() = default;
-  virtual ~FilterStmt();
+  virtual ~FilterStmt() = default;
 
 public:
-  const vector<FilterUnit *> &filter_units() const { return filter_units_; }
+  Expression *predicate() const { return predicate_.get(); }
 
 public:
   static RC create(Db *db, Table *default_table, unordered_map<string, Table *> *tables,
       const ConditionSqlNode *conditions, int condition_num, FilterStmt *&stmt);
 
-  static RC create_filter_unit(Db *db, Table *default_table, unordered_map<string, Table *> *tables,
-      const ConditionSqlNode &condition, FilterUnit *&filter_unit);
+  static RC create(unique_ptr<Expression> predicate, FilterStmt *&stmt);
 
 private:
-  vector<FilterUnit *> filter_units_;  // 默认当前都是AND关系
+  unique_ptr<Expression> predicate_;
 };

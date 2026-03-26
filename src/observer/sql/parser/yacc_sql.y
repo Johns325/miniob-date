@@ -94,9 +94,12 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
         DOT //QUOTE
         INTO
         VALUES
+        INNER
+        JOIN
         FROM
         WHERE
         AND
+        OR
         SET
         ON
         LOAD
@@ -121,32 +124,31 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
 /** union 中定义各种数据类型，真实生成的代码也是union类型，所以不能有非POD类型的数据 **/
 %union {
   ParsedSqlNode *                            sql_node;
-  ConditionSqlNode *                         condition;
   Value *                                    value;
   enum CompOp                                comp;
   RelAttrSqlNode *                           rel_attr;
   vector<AttrInfoSqlNode> *                  attr_infos;
   AttrInfoSqlNode *                          attr_info;
   Expression *                               expression;
+  std::vector<Expression *>*                 raw_expression_list;
   vector<unique_ptr<Expression>> *           expression_list;
   vector<Value> *                            value_list;
-  vector<ConditionSqlNode> *                 condition_list;
   vector<RelAttrSqlNode> *                   rel_attr_list;
   vector<string> *                           relation_list;
+  std::vector<rel_info*> *                   rel_list_type;
   vector<string> *                           key_list;
   char *                                     cstring;
   int                                        number;
   float                                      floats;
+  bool                                       boolean;
 }
 
-%destructor { delete $$; } <condition>
 %destructor { delete $$; } <value>
 %destructor { delete $$; } <rel_attr>
 %destructor { delete $$; } <attr_infos>
 %destructor { delete $$; } <expression>
 %destructor { delete $$; } <expression_list>
 %destructor { delete $$; } <value_list>
-%destructor { delete $$; } <condition_list>
 // %destructor { delete $$; } <rel_attr_list>
 %destructor { delete $$; } <relation_list>
 %destructor { delete $$; } <key_list>
@@ -159,7 +161,6 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
 
 /** type 定义了各种解析后的结果输出的是什么类型。类型对应了 union 中的定义的成员变量名称 **/
 %type <number>              type
-%type <condition>           condition
 %type <value>               value
 %type <number>              number
 %type <cstring>             relation
@@ -168,14 +169,19 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
 %type <attr_infos>          attr_def_list
 %type <attr_info>           attr_def
 %type <value_list>          value_list
-%type <condition_list>      where
-%type <condition_list>      condition_list
+%type <expression>          where
+%type <expression_list>     condition_list
+%type <expression>          on_condition
+%type <raw_expression_list> on_condition_list
+%type <rel_list_type>       rel_list_def
+%type <boolean>             and_or_clause
+%type <raw_expression_list> on_stmt
+%type <raw_expression_list> new_where
 %type <cstring>             storage_format
 %type <key_list>            primary_key
 %type <key_list>            attr_list
 %type <relation_list>       rel_list
 %type <expression>          expression
-%type <expression>          aggregate_expression
 %type <expression_list>     expression_list
 %type <expression_list>     group_by
 %type <cstring>             fields_terminated_by
@@ -464,8 +470,7 @@ delete_stmt:    /*  delete 语句的语法解析树*/
       $$ = new ParsedSqlNode(SCF_DELETE);
       $$->deletion.relation_name = $3;
       if ($4 != nullptr) {
-        $$->deletion.conditions.swap(*$4);
-        delete $4;
+        $$->deletion.where.reset($4);
       }
     }
     ;
@@ -477,32 +482,38 @@ update_stmt:      /*  update 语句的语法解析树*/
       $$->update.attribute_name = $4;
       $$->update.value = *$6;
       if ($7 != nullptr) {
-        $$->update.conditions.swap(*$7);
-        delete $7;
+        $$->update.where.reset($7);
       }
     }
     ;
 select_stmt:        /*  select 语句的语法解析树*/
-    SELECT expression_list FROM rel_list where group_by
+    SELECT expression_list FROM relation rel_list_def new_where
     {
       $$ = new ParsedSqlNode(SCF_SELECT);
       if ($2 != nullptr) {
         $$->selection.expressions.swap(*$2);
         delete $2;
       }
-
-      if ($4 != nullptr) {
-        $$->selection.relations.swap(*$4);
-        delete $4;
-      }
-
+      auto &selection = $$->selection;
+      auto r = new rel_info;
+      r->relation_name = $4;
+      // free($4);
+      selection.relations.emplace_back(r);
+      
       if ($5 != nullptr) {
-        $$->selection.conditions.swap(*$5);
+        printf("has more relations\n");
+        for(auto iter = $5->rbegin(); iter != $5->rend(); ++iter) {
+          selection.relations.emplace_back(*iter);
+          (*iter) = nullptr;
+        }
         delete $5;
       }
 
       if ($6 != nullptr) {
-        $$->selection.group_by.swap(*$6);
+        for (auto iter = $6->rbegin(); iter != $6->rend(); ++iter) {
+          selection.where.emplace_back(*iter);
+          *iter = nullptr;
+        }
         delete $6;
       }
     }
@@ -552,9 +563,6 @@ expression:
     | '-' expression %prec UMINUS {
       $$ = create_arithmetic_expression(ArithmeticExpr::Type::NEGATIVE, $2, nullptr, sql_string, &@$);
     }
-    | '*' {
-      $$ = new StarExpr();
-    }
     | value {
       $$ = new ValueExpr(*$1);
       $$->set_name(token_name(sql_string, &@$));
@@ -566,13 +574,11 @@ expression:
       $$->set_name(token_name(sql_string, &@$));
       delete $1;
     }
-    | aggregate_expression {
-      $$ = $1;
+    | '*' {
+      $$ = new StarExpr();
     }
-    ;
-
-aggregate_expression:
-    ID LBRACE expression RBRACE {
+    // your code here
+    | ID LBRACE expression RBRACE {
       $$ = create_aggregate_expression($1, $3, sql_string, &@$);
     }
     ;
@@ -609,6 +615,109 @@ rel_list:
       $$->insert($$->begin(), $1);
     }
     ;
+rel_list_def:
+  /* empty */ {
+    $$ = nullptr;
+  }
+  | COMMA relation rel_list_def {
+    $$ = ($3 != nullptr ? $3 : new std::vector<rel_info*>());
+  
+    auto r = new rel_info;
+    r->relation_name = string( $2);
+    $$->emplace_back(r);
+    // free($2);
+  }
+  | INNER JOIN relation on_stmt rel_list_def {
+    $$ = ($5 != nullptr ? $5 : new std::vector<rel_info*>());
+    auto r = new rel_info;
+    r->relation_name = $3;
+    // free($3);
+
+    if ($4 != nullptr) {
+      // printf("has on conditions\n");
+      for (size_t i = 0; i < ($4)->size(); ++i) {
+        r->on_conditions.emplace_back((*$4)[i]);
+        // ((*$4)[i]) = nullptr;
+      }
+      std::reverse(r->on_conditions.begin(), r->on_conditions.end());
+      delete $4;
+    }
+    $$->emplace_back(r);
+  }
+  ;
+
+new_where:
+    /* empty */
+    {
+      $$ = nullptr;
+    }
+    | WHERE on_condition_list {
+      $$ = $2;
+    }
+    ;
+on_condition_list:
+  /* empty */ {
+    $$ = nullptr;
+  }
+  | on_condition {
+    $$ = new std::vector<Expression*>;
+    $$->emplace_back($1);
+  }
+  | on_condition and_or_clause on_condition_list {
+    //TODO
+    $$ = $3;
+    $$->emplace_back($1);
+  }
+  ;
+
+on_condition:
+  expression comp_op expression {
+    std::unique_ptr<Expression> left($1);
+    std::unique_ptr<Expression> right($3);
+    $$ = new ComparisonExpr($2, std::move(left), std::move(right));
+  }
+  ;
+and_or_clause:
+  AND {
+    $$ = true;
+  }
+  | OR {
+    $$ = false;
+  }
+  ;
+
+on_stmt:
+  /* empty */ {
+    // cross product
+    $$ = nullptr;
+  }
+  | ON on_condition_list {
+    $$ = $2;
+  }
+  ;
+
+
+on_condition_list:
+  /* empty */ {
+    $$ = nullptr;
+  }
+  | on_condition {
+    $$ = new std::vector<Expression*>;
+    $$->emplace_back($1);
+  }
+  | on_condition and_or_clause on_condition_list {
+    //TODO
+    $$ = $3;
+    $$->emplace_back($1);
+  }
+  ;
+on_condition:
+  expression comp_op expression {
+    std::unique_ptr<Expression> left($1);
+    std::unique_ptr<Expression> right($3);
+    $$ = new ComparisonExpr($2, std::move(left), std::move(right));
+  }
+  ;
 
 where:
     /* empty */
@@ -616,7 +725,17 @@ where:
       $$ = nullptr;
     }
     | WHERE condition_list {
-      $$ = $2;  
+      if ($2 == nullptr || $2->empty()) {
+        $$ = nullptr;
+        delete $2;
+      } else if ($2->size() == 1) {
+        $$ = $2->front().release();
+        delete $2;
+      } else {
+        $$ = new ConjunctionExpr(ConjunctionExpr::Type::AND, *$2);
+        $$->set_name(token_name(sql_string, &@$));
+        delete $2;
+      }
     }
     ;
 condition_list:
@@ -624,68 +743,23 @@ condition_list:
     {
       $$ = nullptr;
     }
-    | condition {
-      $$ = new vector<ConditionSqlNode>;
-      $$->emplace_back(*$1);
-      delete $1;
+    | expression comp_op expression {
+      $$ = new vector<unique_ptr<Expression>>;
+      auto cmp = make_unique<ComparisonExpr>($2, unique_ptr<Expression>($1), unique_ptr<Expression>($3));
+      cmp->set_name(token_name(sql_string, &@$));
+      $$->emplace_back(std::move(cmp));
     }
-    | condition AND condition_list {
-      $$ = $3;
-      $$->emplace_back(*$1);
-      delete $1;
-    }
-    ;
-condition:
-    rel_attr comp_op value
-    {
-      $$ = new ConditionSqlNode;
-      $$->left_is_attr = 1;
-      $$->left_attr = *$1;
-      $$->right_is_attr = 0;
-      $$->right_value = *$3;
-      $$->comp = $2;
-
-      delete $1;
-      delete $3;
-    }
-    | value comp_op value 
-    {
-      $$ = new ConditionSqlNode;
-      $$->left_is_attr = 0;
-      $$->left_value = *$1;
-      $$->right_is_attr = 0;
-      $$->right_value = *$3;
-      $$->comp = $2;
-
-      delete $1;
-      delete $3;
-    }
-    | rel_attr comp_op rel_attr
-    {
-      $$ = new ConditionSqlNode;
-      $$->left_is_attr = 1;
-      $$->left_attr = *$1;
-      $$->right_is_attr = 1;
-      $$->right_attr = *$3;
-      $$->comp = $2;
-
-      delete $1;
-      delete $3;
-    }
-    | value comp_op rel_attr
-    {
-      $$ = new ConditionSqlNode;
-      $$->left_is_attr = 0;
-      $$->left_value = *$1;
-      $$->right_is_attr = 1;
-      $$->right_attr = *$3;
-      $$->comp = $2;
-
-      delete $1;
-      delete $3;
+    | expression comp_op expression AND condition_list {
+      if ($5 != nullptr) {
+        $$ = $5;
+      } else {
+        $$ = new vector<unique_ptr<Expression>>;
+      }
+      auto cmp = make_unique<ComparisonExpr>($2, unique_ptr<Expression>($1), unique_ptr<Expression>($3));
+      cmp->set_name(token_name(sql_string, &@$));
+      $$->emplace_back(std::move(cmp));
     }
     ;
-
 comp_op:
       EQ { $$ = EQUAL_TO; }
     | LT { $$ = LESS_THAN; }
