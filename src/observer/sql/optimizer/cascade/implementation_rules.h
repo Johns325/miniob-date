@@ -168,3 +168,27 @@ public:
   void transform(
       GroupExpr *input, std::vector<CandidateExpression> *transformed, OptimizerContext *context) const override;
 };
+
+/**
+ * Rule transforms Logical OrderBy -> Physical OrderBy
+ */
+class LogicalOrderByToOrderBy : public Rule
+{
+public:
+  LogicalOrderByToOrderBy();
+
+  void transform(
+      GroupExpr *input, std::vector<CandidateExpression> *transformed, OptimizerContext *context) const override;
+};
+
+/**
+ * Rule transforms Logical Limit -> Physical Limit
+ */
+class LogicalLimitToLimit : public Rule
+{
+public:
+  LogicalLimitToLimit();
+
+  void transform(
+      GroupExpr *input, std::vector<CandidateExpression> *transformed, OptimizerContext *context) const override;
+};

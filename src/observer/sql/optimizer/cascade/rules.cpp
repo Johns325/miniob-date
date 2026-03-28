@@ -42,6 +42,8 @@ RuleSet::RuleSet()
   add_rule(RuleSetName::PHYSICAL_IMPLEMENTATION, new LogicalGroupByToAggregation());
   add_rule(RuleSetName::PHYSICAL_IMPLEMENTATION, new LogicalGroupByToHashGroupBy());
   add_rule(RuleSetName::PHYSICAL_IMPLEMENTATION, new LogicalEmptyToEmpty());
+  add_rule(RuleSetName::PHYSICAL_IMPLEMENTATION, new LogicalOrderByToOrderBy());
+  add_rule(RuleSetName::PHYSICAL_IMPLEMENTATION, new LogicalLimitToLimit());
 
   auto &impl_rules = get_rules_by_name(RuleSetName::PHYSICAL_IMPLEMENTATION);
   std::sort(impl_rules.begin(), impl_rules.end(), [](Rule* a, Rule* b){

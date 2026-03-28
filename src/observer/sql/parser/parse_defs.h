@@ -112,6 +112,16 @@ struct SelectSqlNode
   vector<unique_ptr<rel_info>>   relations; ///< 查询的表，可以是多个表的连接
   vector<unique_ptr<Expression>> where;     ///< where clause predicate expression
   vector<unique_ptr<Expression>> group_by;  ///< group by clause
+  vector<unique_ptr<Expression>> having;
+
+  struct OrderByItem
+  {
+    unique_ptr<Expression> expr;
+    bool                   asc = true;
+  };
+
+  vector<OrderByItem> order_by;
+  int                 limit = -1;
 };
 
 /**

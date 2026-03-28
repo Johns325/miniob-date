@@ -218,6 +218,51 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
     }
   } // end of scope
 
+  /* ******************************************************{binding group by}*****************************************************************/
+  vector<unique_ptr<Expression>> bound_group_by_expressions;
+  {
+    auto rc = bind_where(db, expression_binder, select_sql.group_by, bound_group_by_expressions);
+    if (!OB_SUCC(rc)) {
+      return rc;
+    }
+  }
+
+  /* ******************************************************{binding having}*******************************************************************/
+  vector<unique_ptr<Expression>> bound_having_expressions;
+  {
+    auto rc = bind_where(db, expression_binder, select_sql.having, bound_having_expressions);
+    if (!OB_SUCC(rc)) {
+      return rc;
+    }
+  }
+
+  /* ******************************************************{binding order by}*****************************************************************/
+  vector<unique_ptr<Expression>> bound_order_by_expressions;
+  vector<bool>                   bound_order_by_asc;
+  {
+    for (auto &item : select_sql.order_by) {
+      unique_ptr<Expression> order_expr = std::move(item.expr);
+      vector<unique_ptr<Expression>> child_bound_expressions;
+      RC rc = expression_binder->bind_expression(order_expr, child_bound_expressions);
+      if (OB_FAIL(rc)) {
+        LOG_INFO("bind expression failed. rc=%s", strrc(rc));
+        return rc;
+      }
+
+      if (child_bound_expressions.size() != 1) {
+        LOG_INFO("invalid children number of order by expression: %d", child_bound_expressions.size());
+        return RC::INVALID_ARGUMENT;
+      }
+
+      if (child_bound_expressions[0].get() != order_expr.get()) {
+        order_expr.reset(child_bound_expressions[0].release());
+      }
+
+      bound_order_by_expressions.emplace_back(std::move(order_expr));
+      bound_order_by_asc.emplace_back(item.asc);
+    }
+  }
+
   // step 4 everything alright
   SelectStmt *select_stmt = new SelectStmt();
   auto referenced_tables = context.query_tables();
@@ -225,6 +270,11 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
   select_stmt->join_expres_.swap(join_expres);
   select_stmt->query_expressions_.swap(bound_expressions);
   select_stmt->conditions_.swap(bound_where_expressions);
+  select_stmt->group_by_.swap(bound_group_by_expressions);
+  select_stmt->having_.swap(bound_having_expressions);
+  select_stmt->order_by_expressions_.swap(bound_order_by_expressions);
+  select_stmt->order_by_asc_.swap(bound_order_by_asc);
+  select_stmt->limit_ = select_sql.limit;
   stmt = select_stmt;
   return RC::SUCCESS;
 }

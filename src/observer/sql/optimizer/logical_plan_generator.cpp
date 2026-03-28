@@ -26,6 +26,8 @@ See the Mulan PSL v2 for more details. */
 #include "sql/operator/logical/project_logical_operator.h"
 #include "sql/operator/logical/table_get_logical_operator.h"
 #include "sql/operator/logical/group_by_logical_operator.h"
+#include "sql/operator/logical/order_by_logical_operator.h"
+#include "sql/operator/logical/limit_logical_operator.h"
 
 #include "sql/stmt/calc_stmt.h"
 #include "sql/stmt/delete_stmt.h"
@@ -148,6 +150,38 @@ RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, GroupExpr *&root_g
     return rc;
   }
 
+  // 3.5 创建 having（在 group by 之后执行）
+  if (!select_stmt->having().empty()) {
+    unique_ptr<Expression> predicate;
+    if (select_stmt->having().size() == 1) {
+      predicate = std::move(select_stmt->having()[0]);
+      select_stmt->having().clear();
+    } else {
+      vector<unique_ptr<Expression>> conjuncts;
+      conjuncts.swap(select_stmt->having());
+      predicate = make_unique<ConjunctionExpr>(ConjunctionExpr::Type::AND, conjuncts);
+    }
+
+    unique_ptr<OperatorNode> predicate_oper(new PredicateLogicalOperator(std::move(predicate)));
+    CandidateExpression      candidate(std::move(predicate_oper), {last_gexpr->get_group_id()});
+    context->record_node_into_group(candidate, &last_gexpr);
+  }
+
+  // 3.6 创建 order by（在 having/group by 之后执行）
+  if (!select_stmt->order_by_expressions().empty()) {
+    unique_ptr<OperatorNode> order_by_op(
+        new OrderByLogicalOperator(std::move(select_stmt->order_by_expressions()), vector<bool>(select_stmt->order_by_asc())));
+    CandidateExpression candidate(std::move(order_by_op), {last_gexpr->get_group_id()});
+    context->record_node_into_group(candidate, &last_gexpr);
+  }
+
+  // 3.7 创建 limit（在 order by 之后执行）
+  if (select_stmt->limit() >= 0) {
+    unique_ptr<OperatorNode> limit_op(new LimitLogicalOperator(select_stmt->limit()));
+    CandidateExpression      candidate(std::move(limit_op), {last_gexpr->get_group_id()});
+    context->record_node_into_group(candidate, &last_gexpr);
+  }
+
   // 4. 创建projection
   unique_ptr<OperatorNode> project_op(new ProjectLogicalOperator(std::move(select_stmt->query_expressions())));
   CandidateExpression candidate(std::move(project_op), {last_gexpr->get_group_id()});
@@ -243,6 +277,9 @@ RC LogicalPlanGenerator::create_group_by_plan(SelectStmt *select_stmt, GroupExpr
   vector<unique_ptr<Expression>> &group_by_expressions = select_stmt->group_by();
   vector<Expression *> aggregate_expressions;
   vector<unique_ptr<Expression>> &query_expressions = select_stmt->query_expressions();
+  vector<unique_ptr<Expression>> &having_expressions = select_stmt->having();
+  vector<unique_ptr<Expression>> &order_by_expressions = select_stmt->order_by_expressions();
+
   function<RC(unique_ptr<Expression>&)> collector = [&](unique_ptr<Expression> &expr) -> RC {
     RC rc = RC::SUCCESS;
     if (expr->type() == ExprType::AGGREGATION) {
@@ -289,12 +326,36 @@ RC LogicalPlanGenerator::create_group_by_plan(SelectStmt *select_stmt, GroupExpr
     bind_group_by_expr(expression);
   }
 
+  for (unique_ptr<Expression> &expression : having_expressions) {
+    bind_group_by_expr(expression);
+  }
+
+  for (unique_ptr<Expression> &expression : order_by_expressions) {
+    bind_group_by_expr(expression);
+  }
+
   for (unique_ptr<Expression> &expression : query_expressions) {
+    find_unbound_column(expression);
+  }
+
+  for (unique_ptr<Expression> &expression : having_expressions) {
+    find_unbound_column(expression);
+  }
+
+  for (unique_ptr<Expression> &expression : order_by_expressions) {
     find_unbound_column(expression);
   }
 
   // collect all aggregate expressions
   for (unique_ptr<Expression> &expression : query_expressions) {
+    collector(expression);
+  }
+
+  for (unique_ptr<Expression> &expression : having_expressions) {
+    collector(expression);
+  }
+
+  for (unique_ptr<Expression> &expression : order_by_expressions) {
     collector(expression);
   }
 

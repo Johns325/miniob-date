@@ -34,6 +34,10 @@ See the Mulan PSL v2 for more details. */
 #include "sql/operator/physical/hash_join_physical_operator.h"
 #include "sql/operator/physical/empty_physical_operator.h"
 #include "sql/operator/logical/empty_logical_operator.h"
+#include "sql/operator/logical/order_by_logical_operator.h"
+#include "sql/operator/physical/order_by_physical_operator.h"
+#include "sql/operator/logical/limit_logical_operator.h"
+#include "sql/operator/physical/limit_physical_operator.h"
 #include "sql/expr/expression.h"
 #include "sql/parser/parse_defs.h"
 
@@ -462,4 +466,50 @@ void LogicalEmptyToEmpty::transform(
 {
   unique_ptr<PhysicalOperator> empty_phys_oper(new EmptyPhysicalOperator());
   transformed->emplace_back(std::move(empty_phys_oper));
+}
+
+// -------------------------------------------------------------------------------------------------
+// Physical Order By
+// -------------------------------------------------------------------------------------------------
+LogicalOrderByToOrderBy::LogicalOrderByToOrderBy()
+{
+  type_          = RuleType::ORDER_BY_TO_PHYSICAL;
+  match_pattern_ = unique_ptr<Pattern>(new Pattern(OpType::LOGICALORDERBY));
+  auto child     = new Pattern(OpType::LEAF);
+  match_pattern_->add_child(child);
+}
+
+void LogicalOrderByToOrderBy::transform(
+    GroupExpr *input, std::vector<CandidateExpression> *transformed, OptimizerContext *context) const
+{
+  auto order_oper = static_cast<OrderByLogicalOperator *>(input->get_op());
+
+  vector<unique_ptr<Expression>> order_exprs;
+  order_exprs.reserve(order_oper->expressions().size());
+  for (const auto &expr : order_oper->expressions()) {
+    order_exprs.emplace_back(expr->copy());
+  }
+  vector<bool> asc = order_oper->asc();
+
+  auto phys_oper = make_unique<OrderByPhysicalOperator>(std::move(order_exprs), std::move(asc));
+  transformed->emplace_back(std::move(phys_oper), input->get_child_group_ids());
+}
+
+// -------------------------------------------------------------------------------------------------
+// Physical Limit
+// -------------------------------------------------------------------------------------------------
+LogicalLimitToLimit::LogicalLimitToLimit()
+{
+  type_          = RuleType::IMPLEMENT_LIMIT;
+  match_pattern_ = unique_ptr<Pattern>(new Pattern(OpType::LOGICALLIMIT));
+  auto child     = new Pattern(OpType::LEAF);
+  match_pattern_->add_child(child);
+}
+
+void LogicalLimitToLimit::transform(
+    GroupExpr *input, std::vector<CandidateExpression> *transformed, OptimizerContext *context) const
+{
+  auto limit_oper = static_cast<LimitLogicalOperator *>(input->get_op());
+  auto phys_oper  = make_unique<LimitPhysicalOperator>(limit_oper->limit());
+  transformed->emplace_back(std::move(phys_oper), input->get_child_group_ids());
 }

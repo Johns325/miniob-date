@@ -86,6 +86,7 @@ QUOTE            [\'\"]
 EXIT                                    RETURN_TOKEN(EXIT);
 HELP                                    RETURN_TOKEN(HELP);
 DESC                                    RETURN_TOKEN(DESC);
+ASC                                     RETURN_TOKEN(ASC);
 CREATE                                  RETURN_TOKEN(CREATE);
 DROP                                    RETURN_TOKEN(DROP);
 TABLE                                   RETURN_TOKEN(TABLE);
@@ -121,6 +122,9 @@ INFILE                                  RETURN_TOKEN(INFILE);
 EXPLAIN                                 RETURN_TOKEN(EXPLAIN);
 GROUP                                   RETURN_TOKEN(GROUP);
 BY                                      RETURN_TOKEN(BY);
+HAVING                                  RETURN_TOKEN(HAVING);
+ORDER                                   RETURN_TOKEN(ORDER);
+LIMIT                                   RETURN_TOKEN(LIMIT);
 STORAGE                                 RETURN_TOKEN(STORAGE);
 FORMAT                                  RETURN_TOKEN(FORMAT);
 PRIMARY                                 RETURN_TOKEN(PRIMARY);

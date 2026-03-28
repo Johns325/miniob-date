@@ -45,6 +45,10 @@ public:
 
   vector<unique_ptr<Expression>> &query_expressions() { return query_expressions_; }
   vector<unique_ptr<Expression>> &group_by() { return group_by_; }
+  vector<unique_ptr<Expression>> &having() { return having_; }
+  vector<unique_ptr<Expression>> &order_by_expressions() { return order_by_expressions_; }
+  const vector<bool>             &order_by_asc() const { return order_by_asc_; }
+  int                             limit() const { return limit_; }
 
 private:
   vector<unique_ptr<Expression>> query_expressions_;
@@ -53,4 +57,8 @@ private:
   std::vector<unique_ptr<Expression>>           conditions_;
   FilterStmt                    *filter_stmt_ = nullptr;
   vector<unique_ptr<Expression>> group_by_;
+  vector<unique_ptr<Expression>> having_;
+  vector<unique_ptr<Expression>> order_by_expressions_;
+  vector<bool>                   order_by_asc_;
+  int                            limit_ = -1;
 };

@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 #include "common/log/log.h"
 #include "common/lang/string.h"
@@ -50,6 +51,12 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
   return expr;
 }
 
+static bool is_aggregate_function_name(const char *name)
+{
+  return 0 == strcasecmp(name, "count") || 0 == strcasecmp(name, "sum") || 0 == strcasecmp(name, "avg") ||
+         0 == strcasecmp(name, "min") || 0 == strcasecmp(name, "max");
+}
+
 %}
 
 %define api.pure full
@@ -74,6 +81,7 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
         CALC
         SELECT
         DESC
+        ASC
         SHOW
         SYNC
         INSERT
@@ -96,6 +104,9 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
         VALUES
         INNER
         JOIN
+        HAVING
+        ORDER
+        LIMIT
         FROM
         WHERE
         AND
@@ -132,6 +143,8 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
   Expression *                               expression;
   std::vector<Expression *>*                 raw_expression_list;
   vector<unique_ptr<Expression>> *           expression_list;
+  std::vector<SelectSqlNode::OrderByItem> *   order_by_list;
+  SelectSqlNode::OrderByItem *               order_by_item;
   vector<Value> *                            value_list;
   vector<RelAttrSqlNode> *                   rel_attr_list;
   vector<string> *                           relation_list;
@@ -148,6 +161,8 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
 %destructor { delete $$; } <attr_infos>
 %destructor { delete $$; } <expression>
 %destructor { delete $$; } <expression_list>
+%destructor { delete $$; } <order_by_list>
+%destructor { delete $$; } <order_by_item>
 %destructor { delete $$; } <value_list>
 // %destructor { delete $$; } <rel_attr_list>
 %destructor { delete $$; } <relation_list>
@@ -183,7 +198,16 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
 %type <relation_list>       rel_list
 %type <expression>          expression
 %type <expression_list>     expression_list
+%type <expression_list>     func_args_opt
 %type <expression_list>     group_by
+%type <expression_list>     having_stmt
+%type <expression>          having_condition
+%type <expression_list>     having_condition_list
+%type <order_by_list>       order_by
+%type <order_by_list>       order_by_list
+%type <order_by_item>       order_by_unit
+%type <boolean>             order_by_dir
+%type <number>              limit_stmt
 %type <cstring>             fields_terminated_by
 %type <cstring>             enclosed_by
 %type <sql_node>            calc_stmt
@@ -487,7 +511,7 @@ update_stmt:      /*  update 语句的语法解析树*/
     }
     ;
 select_stmt:        /*  select 语句的语法解析树*/
-    SELECT expression_list FROM relation rel_list_def new_where
+    SELECT expression_list FROM relation rel_list_def new_where group_by having_stmt order_by limit_stmt
     {
       $$ = new ParsedSqlNode(SCF_SELECT);
       if ($2 != nullptr) {
@@ -516,6 +540,29 @@ select_stmt:        /*  select 语句的语法解析树*/
         }
         delete $6;
       }
+
+      if ($7 != nullptr) {
+        $$->selection.group_by.swap(*$7);
+        delete $7;
+      }
+      // having
+      if ($8 != nullptr) {
+        for (auto iter = $8->rbegin(); iter != $8->rend(); ++iter) {
+          $$->selection.having.emplace_back((std::move(*iter)));
+        }
+        delete $8;
+      }
+
+      // order by
+      if ($9 != nullptr) {
+        for (auto iter = $9->rbegin(); iter != $9->rend(); ++iter) {
+          $$->selection.order_by.emplace_back(std::move(*iter));
+        }
+        delete $9;
+      }
+
+      // limit
+      $$->selection.limit = $10;
     }
     ;
 calc_stmt:
@@ -541,6 +588,17 @@ expression_list:
         $$ = new vector<unique_ptr<Expression>>;
       }
       $$->emplace($$->begin(), $1);
+    }
+    ;
+
+func_args_opt:
+    /* empty */
+    {
+      $$ = nullptr;
+    }
+    | expression_list
+    {
+      $$ = $1;
     }
     ;
 expression:
@@ -577,9 +635,34 @@ expression:
     | '*' {
       $$ = new StarExpr();
     }
-    // your code here
-    | ID LBRACE expression RBRACE {
-      $$ = create_aggregate_expression($1, $3, sql_string, &@$);
+    | ID LBRACE func_args_opt RBRACE {
+      if (!is_aggregate_function_name($1)) {
+        yyerror(&@$, sql_string, sql_result, scanner, "Failed to parse sql");
+        if ($3 != nullptr) {
+          delete $3;
+        }
+        YYERROR;
+      }
+
+      size_t arg_count = ($3 == nullptr ? 0 : $3->size());
+      Expression *child = nullptr;
+      if (arg_count == 1) {
+        child = (*$3)[0].release();
+      }
+      if ($3 != nullptr) {
+        delete $3;
+      }
+
+      // NOTE:
+      // - count(*) is allowed (binder will rewrite STAR to constant 1)
+      // - other agg(*) should be rejected, but should return FAILURE (not SQL_SYNTAX)
+      // - agg() / agg(a,b) should be rejected, but should return FAILURE (not SQL_SYNTAX)
+      // To match expected behavior, we keep parsing and let binder/executor report FAILURE.
+      if (arg_count != 1) {
+        child = new UnboundFieldExpr("", "__invalid_aggregate_argument__");
+      }
+
+      $$ = create_aggregate_expression($1, child, sql_string, &@$);
     }
     ;
 
@@ -782,6 +865,95 @@ group_by:
       $$ = $3;
     }
     ;
+order_by:
+     /* empty */ {
+      $$ = nullptr;
+    }
+    | ORDER BY order_by_list {
+      $$ = $3;
+    }
+    ;
+
+order_by_list:
+    order_by_unit
+    {
+      $$ = new std::vector<SelectSqlNode::OrderByItem>;
+      $$->emplace_back(std::move(*$1));
+      delete $1;
+    }
+    | order_by_unit COMMA order_by_list
+    {
+      if ($3 != nullptr) {
+        $$ = $3;
+      } else {
+        $$ = new std::vector<SelectSqlNode::OrderByItem>;
+      }
+      $$->emplace($$->begin(), std::move(*$1));
+      delete $1;
+    }
+    ;
+
+order_by_unit:
+    expression order_by_dir
+    {
+      $$ = new SelectSqlNode::OrderByItem;
+      $$->expr.reset($1);
+      $$->asc = $2;
+    }
+    ;
+
+order_by_dir:
+    /* empty */
+    {
+      $$ = true;
+    }
+    | ASC
+    {
+      $$ = true;
+    }
+    | DESC
+    {
+      $$ = false;
+    }
+    ;
+limit_stmt:
+    /* empty */ {
+      $$ = -1;
+    }
+    | LIMIT NUMBER {
+      $$ = (int)$2;
+    }
+    ;
+
+// type: std::vector<Expression*> *
+having_stmt:
+/* empty */ {
+    $$ = nullptr;
+  }
+  | HAVING having_condition_list {
+    $$ = $2;
+  }
+  ;
+having_condition_list:
+  /* empty */ {
+    $$ = nullptr;
+  }
+  | having_condition {
+    $$ = new std::vector<unique_ptr<Expression>>;
+    $$->emplace_back($1);
+  }
+  | having_condition AND having_condition_list {
+    $$ = $3;
+    $$->emplace_back($1);
+  };
+
+having_condition:
+  expression comp_op expression {
+    std::unique_ptr<Expression> left($1);
+    std::unique_ptr<Expression> right($3);
+    $$ = new ComparisonExpr($2, std::move(left), std::move(right));
+  }
+  ;
 load_data_stmt:
     LOAD DATA INFILE SSS INTO TABLE ID fields_terminated_by enclosed_by
     {
