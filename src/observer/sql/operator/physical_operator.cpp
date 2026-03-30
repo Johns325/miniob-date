@@ -20,6 +20,7 @@ string physical_operator_type_name(OpType type)
     case OpType::SEQSCAN: return "TABLE_SCAN";
     case OpType::INDEXSCAN: return "INDEX_SCAN";
     case OpType::ORDERBY: return "ORDER_BY";
+    case OpType::TOPN: return "TOPN";
     case OpType::LIMIT: return "LIMIT";
     case OpType::INNERNLJOIN: return "NESTED_LOOP_JOIN";
     case OpType::INNERHASHJOIN: return "HASH_JOIN";

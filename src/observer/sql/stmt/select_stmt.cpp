@@ -187,7 +187,7 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
   vector<Table *>                               tables;
   unordered_map<string, Table *>                table_map;
   std::vector<std::unique_ptr<ConjunctionExpr>> join_expres;
-  ExpressionBinder                             *expression_binder;
+  std::unique_ptr<ExpressionBinder>             expression_binder;
   /* ******************************************************{binding from}*********************************************************************/
   {
     // step1 开始绑定FROM
@@ -195,7 +195,7 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
     if (!OB_SUCC(res.first)) {
       return res.first;
     }
-    expression_binder = res.second;
+    expression_binder.reset(res.second);
   }
 
   // step 2 collect query fields in `select` statement
@@ -212,7 +212,7 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
    /* ******************************************************{binding where}*******************************************************************/
   vector<unique_ptr<Expression>> bound_where_expressions;  // 可以直接丢给Predicate Operator
   {
-    auto rc = bind_where(db, expression_binder, select_sql.where, bound_where_expressions);
+    auto rc = bind_where(db, expression_binder.get(), select_sql.where, bound_where_expressions);
     if (!OB_SUCC(rc)) {
       return rc;
     }
@@ -221,7 +221,7 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
   /* ******************************************************{binding group by}*****************************************************************/
   vector<unique_ptr<Expression>> bound_group_by_expressions;
   {
-    auto rc = bind_where(db, expression_binder, select_sql.group_by, bound_group_by_expressions);
+    auto rc = bind_where(db, expression_binder.get(), select_sql.group_by, bound_group_by_expressions);
     if (!OB_SUCC(rc)) {
       return rc;
     }
@@ -230,7 +230,7 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
   /* ******************************************************{binding having}*******************************************************************/
   vector<unique_ptr<Expression>> bound_having_expressions;
   {
-    auto rc = bind_where(db, expression_binder, select_sql.having, bound_having_expressions);
+    auto rc = bind_where(db, expression_binder.get(), select_sql.having, bound_having_expressions);
     if (!OB_SUCC(rc)) {
       return rc;
     }

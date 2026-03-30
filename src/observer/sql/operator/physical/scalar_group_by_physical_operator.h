@@ -23,7 +23,7 @@ See the Mulan PSL v2 for more details. */
 class ScalarGroupByPhysicalOperator : public GroupByPhysicalOperator
 {
 public:
-  ScalarGroupByPhysicalOperator(vector<Expression *> &&expressions);
+  ScalarGroupByPhysicalOperator(vector<unique_ptr<Expression>> &&expressions);
   virtual ~ScalarGroupByPhysicalOperator() = default;
 
   OpType get_op_type() const override { return OpType::SCALARGROUPBY; }

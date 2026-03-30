@@ -22,6 +22,8 @@ RuleSet::RuleSet()
   add_rule(RuleSetName::LOGICAL_TRANSFORMATION, new ExpressionSimplifyRule());
   add_rule(RuleSetName::LOGICAL_TRANSFORMATION, new JoinCommutativityRule());
   add_rule(RuleSetName::LOGICAL_TRANSFORMATION, new JoinAssociativityRule());
+  add_rule(RuleSetName::LOGICAL_TRANSFORMATION, new TopNRule());
+  add_rule(RuleSetName::LOGICAL_TRANSFORMATION, new AggregateJoinPushdownRule());
   auto &trans_rules = get_rules_by_name(RuleSetName::LOGICAL_TRANSFORMATION);
   std::sort(trans_rules.begin(), trans_rules.end(), [](Rule* a, Rule* b){
     return static_cast<int>(a->get_type()) > static_cast<int>(b->get_type());
@@ -44,6 +46,7 @@ RuleSet::RuleSet()
   add_rule(RuleSetName::PHYSICAL_IMPLEMENTATION, new LogicalEmptyToEmpty());
   add_rule(RuleSetName::PHYSICAL_IMPLEMENTATION, new LogicalOrderByToOrderBy());
   add_rule(RuleSetName::PHYSICAL_IMPLEMENTATION, new LogicalLimitToLimit());
+  add_rule(RuleSetName::PHYSICAL_IMPLEMENTATION, new LogicalTopNToTopN());
 
   auto &impl_rules = get_rules_by_name(RuleSetName::PHYSICAL_IMPLEMENTATION);
   std::sort(impl_rules.begin(), impl_rules.end(), [](Rule* a, Rule* b){

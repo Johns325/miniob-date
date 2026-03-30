@@ -72,3 +72,33 @@ public:
   void transform(
       GroupExpr *input, std::vector<CandidateExpression> *transformed, OptimizerContext *context) const override;
 };
+
+/**
+ * Rule transforms Limit(OrderBy(X)) -> TopN(X)
+ */
+class TopNRule : public Rule
+{
+public:
+  TopNRule();
+
+  void transform(
+      GroupExpr *input, std::vector<CandidateExpression> *transformed, OptimizerContext *context) const override;
+};
+
+/**
+ * Rule transforms ScalarGroupBy(Join(L, R)) -> ScalarGroupBy(Join(L, HashGroupBy(R))) (or symmetric)
+ *
+ * Current simplified version:
+ * - Only scalar aggregation (no GROUP BY at the top)
+ * - Only INNER equi-join predicates (possibly conjunctions)
+ * - Only pushes aggregation to one side (chosen based on aggregate column references)
+ * - Supports COUNT(*) and SUM/MIN/MAX on one side; AVG/COUNT(col) are not rewritten.
+ */
+class AggregateJoinPushdownRule : public Rule
+{
+public:
+  AggregateJoinPushdownRule();
+
+  void transform(
+      GroupExpr *input, std::vector<CandidateExpression> *transformed, OptimizerContext *context) const override;
+};

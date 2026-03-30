@@ -20,7 +20,7 @@ See the Mulan PSL v2 for more details. */
 using namespace std;
 using namespace common;
 
-ScalarGroupByPhysicalOperator::ScalarGroupByPhysicalOperator(vector<Expression *> &&expressions)
+ScalarGroupByPhysicalOperator::ScalarGroupByPhysicalOperator(vector<unique_ptr<Expression>> &&expressions)
     : GroupByPhysicalOperator(std::move(expressions))
 {}
 

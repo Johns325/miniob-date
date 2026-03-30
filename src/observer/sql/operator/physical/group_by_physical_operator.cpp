@@ -21,9 +21,19 @@ See the Mulan PSL v2 for more details. */
 using namespace std;
 using namespace common;
 
-GroupByPhysicalOperator::GroupByPhysicalOperator(vector<Expression *> &&expressions)
+GroupByPhysicalOperator::GroupByPhysicalOperator(vector<unique_ptr<Expression>> &&expressions)
 {
-  aggregate_expressions_ = std::move(expressions);
+  // NOTE: physical operators may outlive the optimizer memo that produced the logical plan.
+  // Therefore we must own the expressions we will evaluate at runtime.
+  owned_aggregate_expressions_ = std::move(expressions);
+
+  aggregate_expressions_.clear();
+  aggregate_expressions_.reserve(owned_aggregate_expressions_.size());
+  for (auto &owned_expr : owned_aggregate_expressions_) {
+    ASSERT(owned_expr != nullptr, "aggregate expression must not be null");
+    aggregate_expressions_.emplace_back(owned_expr.get());
+  }
+
   value_expressions_.reserve(aggregate_expressions_.size());
   ranges::for_each(aggregate_expressions_, [this](Expression *expr) {
     auto       *aggregate_expr = static_cast<AggregateExpr *>(expr);

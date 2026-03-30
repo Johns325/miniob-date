@@ -496,7 +496,13 @@ public:
 
   bool equal(const Expression &other) const override;
 
-  unique_ptr<Expression> copy() const override { return make_unique<AggregateExpr>(aggregate_type_, child_->copy()); }
+  unique_ptr<Expression> copy() const override
+  {
+    auto copied = make_unique<AggregateExpr>(aggregate_type_, child_->copy());
+    copied->set_name(name());
+    copied->set_pos(pos());
+    return copied;
+  }
 
   ExprType type() const override { return ExprType::AGGREGATION; }
 

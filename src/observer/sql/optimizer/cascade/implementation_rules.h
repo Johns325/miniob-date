@@ -192,3 +192,15 @@ public:
   void transform(
       GroupExpr *input, std::vector<CandidateExpression> *transformed, OptimizerContext *context) const override;
 };
+
+/**
+ * Rule transforms Logical TopN -> Physical TopN
+ */
+class LogicalTopNToTopN : public Rule
+{
+public:
+  LogicalTopNToTopN();
+
+  void transform(
+      GroupExpr *input, std::vector<CandidateExpression> *transformed, OptimizerContext *context) const override;
+};

@@ -1,0 +1,22 @@
+-- echo initialization
+set use_cascade=1;
+
+CREATE TABLE ap_l(id int, v int);
+CREATE TABLE ap_r(id int, w int);
+
+INSERT INTO ap_l VALUES (1, 10);
+INSERT INTO ap_l VALUES (2, 20);
+INSERT INTO ap_l VALUES (3, 30);
+
+INSERT INTO ap_r VALUES (1, 100);
+INSERT INTO ap_r VALUES (1, 101);
+INSERT INTO ap_r VALUES (2, 200);
+
+analyze table ap_l;
+analyze table ap_r;
+
+-- ensure:hashgroupby select count(*) from ap_l inner join ap_r on ap_l.id = ap_r.id;
+select count(*) from ap_l inner join ap_r on ap_l.id = ap_r.id;
+
+-- ensure:hashgroupby select sum(ap_l.v) from ap_l inner join ap_r on ap_l.id = ap_r.id;
+select sum(ap_l.v) from ap_l inner join ap_r on ap_l.id = ap_r.id;

@@ -503,6 +503,9 @@ class CommandRunner:
     elif command == "ensure:hashjoin*4":
       if len(data.split("HASH_JOIN")) != 5:
         return False
+    elif command == "ensure:hashgroupby":
+      if len(data.split("HASH_GROUP_BY")) != 2:
+        return False
     elif command == "ensure:nlj":
       if len(data.split("NESTED_LOOP_JOIN")) != 2:
         return False

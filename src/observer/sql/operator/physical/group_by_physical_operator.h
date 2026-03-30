@@ -25,7 +25,7 @@ See the Mulan PSL v2 for more details. */
 class GroupByPhysicalOperator : public PhysicalOperator
 {
 public:
-  GroupByPhysicalOperator(vector<Expression *> &&expressions);
+  GroupByPhysicalOperator(vector<unique_ptr<Expression>> &&expressions);
   virtual ~GroupByPhysicalOperator() = default;
 
   virtual uint64_t hash() const override
@@ -53,18 +53,11 @@ public:
     const auto &other_gb = static_cast<const GroupByPhysicalOperator &>(other);
     if (aggregate_expressions_.size() != other_gb.aggregate_expressions_.size())
       return false;
-    if (value_expressions_.size() != other_gb.value_expressions_.size())
-      return false;
     for (size_t i = 0; i < aggregate_expressions_.size(); i++) {
-      if (aggregate_expressions_[i] != other_gb.aggregate_expressions_[i]) {
-        // 对于 Expression*，比较指针是否相同
+      if (aggregate_expressions_[i] == nullptr || other_gb.aggregate_expressions_[i] == nullptr)
         return false;
-      }
-    }
-    for (size_t i = 0; i < value_expressions_.size(); i++) {
-      if (value_expressions_[i] != other_gb.value_expressions_[i]) {
+      if (!aggregate_expressions_[i]->equal(*other_gb.aggregate_expressions_[i]))
         return false;
-      }
     }
     return true;
   }
@@ -96,4 +89,7 @@ protected:
 protected:
   vector<Expression *> aggregate_expressions_;  /// 聚合表达式
   vector<Expression *> value_expressions_;      /// 计算聚合时的表达式
+  
+private:
+  vector<unique_ptr<Expression>> owned_aggregate_expressions_;
 };

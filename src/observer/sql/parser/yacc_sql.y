@@ -888,7 +888,7 @@ order_by_list:
       } else {
         $$ = new std::vector<SelectSqlNode::OrderByItem>;
       }
-      $$->emplace($$->begin(), std::move(*$1));
+      $$->emplace_back(std::move(*$1));
       delete $1;
     }
     ;

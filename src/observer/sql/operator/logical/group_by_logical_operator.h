@@ -21,6 +21,9 @@ class GroupByLogicalOperator : public LogicalOperator
 public:
   GroupByLogicalOperator(vector<unique_ptr<Expression>> &&group_by_exprs, vector<Expression *> &&expressions);
 
+  // Own aggregate expressions (used by optimizer rewrites that synthesize new aggregates)
+  GroupByLogicalOperator(vector<unique_ptr<Expression>> &&group_by_exprs, vector<unique_ptr<Expression>> &&aggregate_exprs);
+
   virtual ~GroupByLogicalOperator() = default;
 
   OpType get_op_type() const override { return OpType::LOGICALGROUPBY; }
@@ -53,9 +56,10 @@ public:
         return false;
     }
     for (size_t i = 0; i < aggregate_expressions_.size(); i++) {
-      if (aggregate_expressions_[i] != other_gb.aggregate_expressions_[i]) {
-        // 对于 Expression*，比较指针是否相同
-        // 如果需要深度比较，可以使用 equal，但这里 Expression* 可能指向同一个对象
+      if (aggregate_expressions_[i] == nullptr || other_gb.aggregate_expressions_[i] == nullptr) {
+        return aggregate_expressions_[i] == other_gb.aggregate_expressions_[i];
+      }
+      if (!aggregate_expressions_[i]->equal(*(other_gb.aggregate_expressions_[i]))) {
         return false;
       }
     }
@@ -65,9 +69,12 @@ public:
   auto &group_by_expressions() { return group_by_expressions_; }
   auto &aggregate_expressions() { return aggregate_expressions_; }
 
+  unique_ptr<LogicalProperty> find_log_prop(const vector<LogicalProperty *> &log_props) override;
+
   unique_ptr<LogicalOperator> clone() const override;
 
 private:
   vector<unique_ptr<Expression>> &group_by_expressions_ = expressions_;
+  vector<unique_ptr<Expression>>  owned_aggregate_expressions_{};
   vector<Expression *>            aggregate_expressions_;  ///< 输出的表达式，可能包含聚合函数
 };

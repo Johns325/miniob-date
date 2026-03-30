@@ -38,6 +38,8 @@ See the Mulan PSL v2 for more details. */
 #include "sql/operator/physical/order_by_physical_operator.h"
 #include "sql/operator/logical/limit_logical_operator.h"
 #include "sql/operator/physical/limit_physical_operator.h"
+#include "sql/operator/logical/topn_logical_operator.h"
+#include "sql/operator/physical/topn_physical_operator.h"
 #include "sql/expr/expression.h"
 #include "sql/parser/parse_defs.h"
 
@@ -411,9 +413,10 @@ void LogicalGroupByToAggregation::transform(
   
   // Only generate ScalarGroupBy when group_by_expressions is empty
   if (group_by_expressions.empty()) {
-    vector<Expression *> aggregate_exprs;
+    vector<unique_ptr<Expression>> aggregate_exprs;
+    aggregate_exprs.reserve(groupby_oper->aggregate_expressions().size());
     for (auto expr : groupby_oper->aggregate_expressions()) {
-      aggregate_exprs.push_back(expr);
+      aggregate_exprs.emplace_back(expr->copy());
     }
     auto groupby_phys_oper = make_unique<ScalarGroupByPhysicalOperator>(std::move(aggregate_exprs));
     transformed->emplace_back(std::move(groupby_phys_oper), input->get_child_group_ids());
@@ -443,9 +446,10 @@ void LogicalGroupByToHashGroupBy::transform(
     for (auto &expr : group_by_expressions) {
       group_by_exprs.push_back(expr->copy());
     }
-    vector<Expression *> aggregate_exprs;
+    vector<unique_ptr<Expression>> aggregate_exprs;
+    aggregate_exprs.reserve(groupby_oper->aggregate_expressions().size());
     for (auto expr : groupby_oper->aggregate_expressions()) {
-      aggregate_exprs.push_back(expr);
+      aggregate_exprs.emplace_back(expr->copy());
     }
     auto groupby_phys_oper = make_unique<HashGroupByPhysicalOperator>(std::move(group_by_exprs), std::move(aggregate_exprs));
     transformed->emplace_back(std::move(groupby_phys_oper), input->get_child_group_ids());
@@ -511,5 +515,32 @@ void LogicalLimitToLimit::transform(
 {
   auto limit_oper = static_cast<LimitLogicalOperator *>(input->get_op());
   auto phys_oper  = make_unique<LimitPhysicalOperator>(limit_oper->limit());
+  transformed->emplace_back(std::move(phys_oper), input->get_child_group_ids());
+}
+
+// -------------------------------------------------------------------------------------------------
+// Physical TopN
+// -------------------------------------------------------------------------------------------------
+LogicalTopNToTopN::LogicalTopNToTopN()
+{
+  type_          = RuleType::TOPN_TO_PHYSICAL;
+  match_pattern_ = unique_ptr<Pattern>(new Pattern(OpType::LOGICALTOPN));
+  auto child     = new Pattern(OpType::LEAF);
+  match_pattern_->add_child(child);
+}
+
+void LogicalTopNToTopN::transform(
+    GroupExpr *input, std::vector<CandidateExpression> *transformed, OptimizerContext *context) const
+{
+  auto topn_oper = static_cast<TopNLogicalOperator *>(input->get_op());
+
+  vector<unique_ptr<Expression>> order_exprs;
+  order_exprs.reserve(topn_oper->expressions().size());
+  for (const auto &expr : topn_oper->expressions()) {
+    order_exprs.emplace_back(expr->copy());
+  }
+  vector<bool> asc = topn_oper->asc();
+
+  auto phys_oper = make_unique<TopNPhysicalOperator>(std::move(order_exprs), std::move(asc), topn_oper->limit());
   transformed->emplace_back(std::move(phys_oper), input->get_child_group_ids());
 }

@@ -52,6 +52,7 @@ string logical_operator_type_name(OpType type)
     case OpType::LOGICALUPDATE: return "LOGICAL_UPDATE";
     case OpType::LOGICALLIMIT: return "LOGICAL_LIMIT";
     case OpType::LOGICALORDERBY: return "LOGICAL_ORDER_BY";
+    case OpType::LOGICALTOPN: return "LOGICAL_TOPN";
     case OpType::LOGICALANALYZE: return "LOGICAL_ANALYZE";
     case OpType::LOGICALEXPLAIN: return "LOGICAL_EXPLAIN";
     case OpType::LOGICALEMPTY: return "LOGICAL_EMPTY";

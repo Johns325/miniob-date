@@ -26,6 +26,8 @@ enum class RuleType : uint32_t
 
   JOIN_COMMUTATIVITY,   // Join 交换律
   JOIN_ASSOCIATIVITY,   // Join 结合律
+  ORDER_BY_LIMIT_TO_TOPN,  // Limit(OrderBy(X)) -> TopN(X)
+  AGGREGATE_JOIN_PUSHDOWN,  // ScalarGroupBy(Join) -> partial aggregate pushdown then join
 
   // Don't move this one
   LogicalPhysicalDelimiter,
@@ -40,6 +42,7 @@ enum class RuleType : uint32_t
   INNER_JOIN_TO_NL_JOIN,
   INNER_JOIN_TO_HASH_JOIN,
   ORDER_BY_TO_PHYSICAL,
+  TOPN_TO_PHYSICAL,
   IMPLEMENT_LIMIT,
   PROJECTION_TO_PHYSOCAL,
   ANALYZE_TO_PHYSICAL,
